@@ -249,3 +249,9 @@ recorded here (`AGENTS.md` §9, rule 1).
   lines not updated. `references.md` gained the official links and a citing
   rule, also pointed to from `AGENTS.md` §5; `analysis/INDEX.md` needed no
   change.
+- 2026-11-05: Public GitHub copy published by the user:
+  `jcferretti/etcd-gotchas`, public, one commit (`7805a6e`, a snapshot of
+  `3c4fd57`). Verified from an anonymous clone: 29 files, the paper placeholder
+  in place, `publish/` absent, the noreply address on the commit, every other
+  file identical to `origin`, and no denylisted text in any object. To update
+  it, push to `origin`, then run `publish/publish-github.sh --push`.
