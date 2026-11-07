@@ -6,13 +6,15 @@
 
 **Upstream references:** See the linked issue and PR list in [Appendix C](#appendix-c-verification-record).
 
+**Confidence review:** 2026-11-06. Claim-level ratings reassessed against the cited evidence, including targeted rereading of the Chubby protocol and pinned leasing-cache paths. Earlier investigation and issue-status dates remain unchanged; no new runtime results are claimed.
+
 ## Scope
 
 Evaluate how Chubby's session and KeepAlive protocol supports cache coherence and coordination, and which etcd lease and watch problems that design could prevent or simplify.
 
 ## Summary
 
-**Chubby ties continued session validity to the client work needed to keep cached data consistent.** A client cannot indefinitely retain its cache rights by renewing its session while ignoring invalidation requests. This is the strongest supported version of the design hypothesis.
+**High confidence in the described protocol:** Chubby ties continued session validity to the client work needed to keep cached data consistent. A client cannot indefinitely retain its cache rights by renewing its session while ignoring invalidation requests. **Moderate confidence — architectural assessment:** this is the strongest supported version of the design hypothesis.
 
 - **High confidence — protocol guarantee:** before modifying cached state, the master waits until affected clients acknowledge invalidation or lose permission to use their caches. Conservative client timeouts make expiration safe to rely on. An independently renewed etcd lease supplies no equivalent cache guarantee.
 - **Moderate confidence — simpler coordination:** one session connects handles, locks, cache validity, and recovery. Applications have fewer independent signals to reconcile. The client library and server still have substantial correctness obligations.
@@ -58,9 +60,9 @@ The default extension is twelve seconds, but this is not a fixed upper bound on 
 
 The analogy between an etcd lease-attached key and a Chubby ephemeral file is useful, but not exact. The paper says an ephemeral node is deleted when **no client has it open**; an ephemeral directory must also be empty. Another client's open handle can therefore keep a file present after the creator loses its session. Parent-directory events allow monitoring an ephemeral child without incrementing that child's open-reference count. **Verified, High confidence:** Chubby §§2.3 and 2.5, pp. 4–5; `doc/chubby-osdi06.md:118`, `:166`.
 
-For the common pattern in which a process is the only opener of its presence file, losing the session can remove the file. That is a conditional application pattern, not the complete deletion rule. In contrast, an etcd lease revocation deletes its attached keys regardless of how many clients have read or watched them (`server/lease/lessor.go:326–361 @ v3.7.3`).
+**High confidence — conditional on the stated open-handle pattern:** For the common pattern in which a process is the only opener of its presence file, losing the session can remove the file. That is a conditional application pattern, not the complete deletion rule. In contrast, an etcd lease revocation deletes its attached keys regardless of how many clients have read or watched them (`server/lease/lessor.go:326–361 @ v3.7.3`).
 
-This distinction matters operationally: observing a Chubby ephemeral file by opening it can inadvertently prolong its lifetime. The paper also records delayed ephemeral-file cleanup after failover while handles are reconstructed (§2.9, p. 9; `doc/chubby-osdi06.md:313`). Neither system's presence record proves instantaneous process health.
+**High confidence — consequence of the documented lifetime rules:** This distinction matters operationally: observing a Chubby ephemeral file by opening it can inadvertently prolong its lifetime. The paper also records delayed ephemeral-file cleanup after failover while handles are reconstructed (§2.9, p. 9; `doc/chubby-osdi06.md:313`). Neither system's presence record proves instantaneous process health.
 
 ### 2.3 Sessions provide lifetime; file names identify coordination objects
 
@@ -80,9 +82,9 @@ An application file-change event, by contrast, is delivered **after** the corres
 
 Chubby §4.6 reports that TCP retransmission/backoff behavior conflicted with session deadlines during congestion, leading to lost sessions. The implementation described in the paper moved KeepAlives to UDP. The authors then proposed a TCP `GetEvent()` RPC, held in the same manner, for normal event and invalidation delivery. KeepAlive replies would retain a list of unacknowledged events so that acknowledgment remained necessary. **Verified, High confidence:** Chubby §4.6, p. 14; `doc/chubby-osdi06.md:542–546`.
 
-The proposal preserves the acknowledgment requirement while changing the delivery channel. It supports the interpretation in §1: separate channels can retain Chubby's guarantee if renewal still depends on completing the required work. The paper presents this as future work, so it establishes neither deployment nor a complete specification of retransmission and acknowledgment rules.
+**High confidence — interpretation of the stated proposal:** The proposal preserves the acknowledgment requirement while changing the delivery channel. It supports the interpretation in §1: separate channels can retain Chubby's guarantee if renewal still depends on completing the required work. The paper presents this as future work, so it establishes neither deployment nor a complete specification of retransmission and acknowledgment rules.
 
-The transport experience also limits the performance argument. Combining urgent lifetime maintenance and potentially bulky event traffic creates scheduling demands. UDP does not guarantee deadlines under arbitrary congestion, and this historical report does not establish that present etcd HTTP/2 performs worse. That comparison would need a controlled test. The useful lesson is to preserve the dependency while allowing appropriate transport and scheduling for each kind of traffic.
+**Moderate confidence — transport/scheduling assessment, not an etcd comparison result:** The transport experience also limits the performance argument. Combining urgent lifetime maintenance and potentially bulky event traffic creates scheduling demands. UDP does not guarantee deadlines under arbitrary congestion, and this historical report does not establish that present etcd HTTP/2 performs worse. That comparison would need a controlled test. The useful lesson is to preserve the dependency while allowing appropriate transport and scheduling for each kind of traffic.
 
 ## 3. How invalidation makes cached reads consistent
 
@@ -161,19 +163,19 @@ The paper's election procedure combines a named lock, a session-associated handl
 
 There is a further useful rule: if an operation on a handle fails because its session expired, subsequent operations on that handle also fail, except cleanup operations. The paper explains how this prevents an arbitrary subsequence of operations from surviving session loss and supports a final write marking a sequence as committed. This is an ordering aid; it is not a general multi-object transaction. **Verified, High confidence:** Chubby §2.8, p. 8; `doc/chubby-osdi06.md:281`.
 
-Jeopardy, safe, and expired notifications make uncertainty explicit. During jeopardy, the client can suspend work that depends on the session and resume if the same session survives. Centralizing that behavior in a library reduces the recovery logic each application must supply. The application remains responsible for suspending its own external activity correctly. **Verified protocol, inferred benefit:** §§2.8–2.9, `doc/chubby-osdi06.md:265–289`.
+Jeopardy, safe, and expired notifications make uncertainty explicit. During jeopardy, the client can suspend work that depends on the session and resume if the same session survives. Centralizing that behavior in a library reduces the recovery logic each application must supply. The application remains responsible for suspending its own external activity correctly. **High confidence in the described protocol; Moderate in the inferred reduction of application recovery work:** §§2.8–2.9, `doc/chubby-osdi06.md:265–289`.
 
 ### 4.2 etcd does support sessions and locks, but through composition
 
 etcd provides a Lock RPC and a Go session abstraction through composition. Its Go `concurrency.Session` grants or adopts a lease and drains a keepalive channel; `Done()` follows that channel's termination. The mutex implementation uses lease-attached candidate keys, creation revisions, transactions, and watches for predecessor deletion. The server's Lock RPC itself delegates to this implementation. **Verified, High confidence:** `client/v3/concurrency/session.go:40–97`; `client/v3/concurrency/mutex.go:75–129`; `server/etcdserver/api/v3lock/lock.go:35–49 @ v3.7.3`.
 
-The architectural distinction is that this session does not establish a server-enforced relationship between all of the client's reads, watches, local caches, and renewal. Merely adopting one lease per process does not add Chubby's invalidation or uncertainty rules.
+**High confidence — scope of the inspected session implementation:** The architectural distinction is that this session does not establish a server-enforced relationship between all of the client's reads, watches, local caches, and renewal. Merely adopting one lease per process does not add Chubby's invalidation or uncertainty rules.
 
 The distinction also affects lock waiters. Chubby exposes acquisition on a session-associated handle, including cancellation of outstanding `Acquire()` calls. The application does not maintain a watch on the previous lock holder's key or track that watch's replay position. etcd's concurrency library also hides much of this work, but internally it waits on that watch and then checks whether the contender's own key still exists.
 
-**Evidence:** §2.6, `doc/chubby-osdi06.md:199`, `:209`; §2.7, `:247`; `client/v3/concurrency/mutex.go:87–105 @ v3.7.3`. **Moderate confidence — design consequence:** making ownership and acquisition server operations can reduce the independently failing mechanisms involved. This does not establish fewer internal races or lower acquisition latency in Chubby; its implementation is unavailable and its session and lock delays still apply.
+**Evidence — High confidence in the described mechanisms:** §2.6, `doc/chubby-osdi06.md:199`, `:209`; §2.7, `:247`; `client/v3/concurrency/mutex.go:87–105 @ v3.7.3`. **Moderate confidence — design consequence:** making ownership and acquisition server operations can reduce the independently failing mechanisms involved. This does not establish fewer internal races or lower acquisition latency in Chubby; its implementation is unavailable and its session and lock delays still apply.
 
-Composition can nevertheless be correct. For protected changes inside etcd, an ownership comparison can be included in the same transaction as the change; `Mutex.IsOwner()` supplies a creation-revision comparison (`client/v3/concurrency/mutex.go:152–153 @ v3.7.3`). Chubby's advantage is a more integrated default coordination contract, not unique computational ability.
+**High confidence — transaction-level reasoning:** Composition can nevertheless be correct. For protected changes inside etcd, an ownership comparison can be included in the same transaction as the change; `Mutex.IsOwner()` supplies a creation-revision comparison (`client/v3/concurrency/mutex.go:152–153 @ v3.7.3`). **Moderate confidence — design assessment:** Chubby's advantage is a more integrated default coordination contract, not unique computational ability.
 
 ### 4.3 Neither session liveness nor a lock stops delayed external requests
 
@@ -183,7 +185,7 @@ Chubby explicitly addresses this with **sequencers** containing lock identity, m
 
 Session loss releases ownership under the coordination protocol; it does not make an external service safe by itself. Likewise, a successful Chubby read followed by an external action can race a later change. Consistent cached reads simplify obtaining current information; they do not turn read-then-act into an atomic distributed operation.
 
-Lock acquisition after failure can also be delayed beyond session expiration by lock-delay. Normal explicit release does not incur that delay. Therefore “the lock is taken away after twelve seconds” is not an adequate takeover-latency model.
+**High confidence — documented lock-delay behavior:** Lock acquisition after failure can also be delayed beyond session expiration by lock-delay. Normal explicit release does not incur that delay. Therefore “the lock is taken away after twelve seconds” is not an adequate takeover-latency model.
 
 ### 4.4 Lock waiting and stale unlocks need different remedies
 
@@ -201,7 +203,7 @@ This is a progress problem. It does not establish that the expired contender acq
 
 This is an acquisition-identity problem **within one live session**. It needs a generation comparison at the mutation, such as the existing creation-revision ownership predicate, rather than better KeepAlive delivery. A native lock service can centralize that check, but merely naming a session cannot supply it. Chubby's handle-instance and lock-generation concepts are relevant precedents; the paper does not prove its `Release()` implementation immune to every delayed retry.
 
-jetcd uses the same composed server implementation. `LockImpl` calls the Lock and Unlock RPCs; the server invokes an in-process Go client through adapters. It creates a session wrapper and immediately orphans its renewal before waiting. This adds internal session-management work, but does not establish a new network connection or even a renewal packet per call: subscriptions and transport are shared, and cancellation can race sending. Language bindings therefore inherit the server implementation's semantics without implementing the lock algorithm themselves.
+**High confidence — source-derived delegation and setup behavior:** jetcd uses the same composed server implementation. `LockImpl` calls the Lock and Unlock RPCs; the server invokes an in-process Go client through adapters. It creates a session wrapper and immediately orphans its renewal before waiting. This adds internal session-management work, but does not establish a new network connection or even a renewal packet per call: subscriptions and transport are shared, and cancellation can race sending. Language bindings therefore inherit the server implementation's semantics without implementing the lock algorithm themselves.
 
 **Evidence:** `jetcd-core/src/main/java/io/etcd/jetcd/impl/LockImpl.java:60–86 @ jetcd-0.8.7`; `server/embed/serve.go:148–150`; `server/etcdserver/api/v3client/v3client.go:27–40`; `server/etcdserver/api/v3lock/lock.go:35–57 @ v3.7.3`.
 
@@ -226,7 +228,7 @@ The findings below connect to [the lease analysis](leases-codex.md) and [the wat
 
 The Go client sets its deadline to response receipt time plus the returned TTL and normally schedules the next renewal at approximately TTL/3 (`client/v3/lease.go:542–556 @ v3.7.3`). jetcd similarly uses receipt-time wall-clock arithmetic (`jetcd-core/src/main/java/io/etcd/jetcd/impl/LeaseImpl.java:249–266 @ jetcd-0.8.7`). **Verified, High confidence.**
 
-A reply delayed in transit can therefore leave the client with a later deadline than the leader's actual expiry. These are client renewal-management deadlines, not conservative certificates of current lock ownership or cache validity. Chubby expressly requires the latter kind of conservative reasoning for cached reads (§2.8, p. 7; `doc/chubby-osdi06.md:263`).
+**High confidence — consequence of the deadline arithmetic:** A reply delayed in transit can therefore leave the client with a later deadline than the leader's actual expiry. These are client renewal-management deadlines, not conservative certificates of current lock ownership or cache validity. Chubby expressly requires the latter kind of conservative reasoning for cached reads (§2.8, p. 7; `doc/chubby-osdi06.md:263`).
 
 **Inference, High confidence:** Implementing Chubby-like cached-read safety would require changing the interpretation and calculation of validity, not simply directing both APIs to the same endpoint. This observation does not prove ordinary etcd KV operations incorrect, and it does not by itself establish that the etcd clients violate a documented promise of Chubby-style cache safety.
 
@@ -236,7 +238,7 @@ The current Go watch client can append responses to an uncapped per-watch buffer
 
 **Evidence — Verified code, High confidence; production severity unmeasured here:** `client/v3/watch.go:818–880 @ v3.7.3`; `server/storage/mvcc/watchable_store.go:346–435`; `server/storage/mvcc/watcher_group.go:25–39`; `server/storage/mvcc/watchable_store_txn.go:41–46 @ v3.7.3`.
 
-Chubby invalidates rather than updating a cache on every modification. After invalidation, a client that never reads again need not receive every replacement value. This avoids an unbounded stream of unnecessary **cache updates**, exactly the motivation in §2.7, p. 7 (`doc/chubby-osdi06.md:243`). It does not establish that all notifications are coalesced or that all server memory is bounded.
+**High confidence — described cache protocol:** Chubby invalidates rather than updating a cache on every modification. After invalidation, a client that never reads again need not receive every replacement value. This avoids an unbounded stream of unnecessary **cache updates**, exactly the motivation in §2.7, p. 7 (`doc/chubby-osdi06.md:243`). It does not establish that all notifications are coalesced or that all server memory is bounded.
 
 jetcd's watch-resume cursor provides another example. `WatchImpl` raises its resume revision to the revision in the watch-creation response before historical events necessarily arrive. If the connection then fails before the first replay response, a retry can omit part of the requested history. The first event response can reset the cursor to the delivered revision plus one, so the timing window matters.
 
@@ -244,7 +246,7 @@ jetcd's watch-resume cursor provides another example. `WatchImpl` raises its res
 
 An invalidate-and-reread design need not track that historical cursor to restore current state. But an application that must process every transition still needs a delivery/replay protocol. It cannot claim the cursor problem has been solved merely by switching to an API that does not promise those transitions.
 
-Chubby's own file-change events may be lost during failover; a failover event requests rescanning (§2.5, p. 5; §2.9, p. 9; `doc/chubby-osdi06.md:167`, `:309`). The paper explicitly reports that its event mechanism is inefficient for all but trivial publish/subscribe uses (§4.5, pp. 13–14; `doc/chubby-osdi06.md:516–524`).
+**High confidence — reported protocol limits:** Chubby's own file-change events may be lost during failover; a failover event requests rescanning (§2.5, p. 5; §2.9, p. 9; `doc/chubby-osdi06.md:167`, `:309`). The paper explicitly reports that its event mechanism is inefficient for all but trivial publish/subscribe uses (§4.5, pp. 13–14; `doc/chubby-osdi06.md:516–524`).
 
 ### 5.3 Server authority and renewal promises still need enforcement
 
@@ -273,15 +275,15 @@ For a symbolic comparison, let `S` be the number of active sessions, `L` the num
 | Chubby | Proportional to `S/T` | No early replies to deliver events |
 | etcd Go client | Proportional to `3L/T` | Healthy TTL/3 renewal scheduling |
 
-These are **message-rate approximations**, not throughput predictions. They omit RPC overhead, batching, scheduling, network delay, and event traffic.
+These are **Moderate-confidence message-rate approximations under the table's assumptions**, not throughput predictions. They omit RPC overhead, batching, scheduling, network delay, and event traffic.
 
-The comparison also depends on object grouping. etcd can attach many keys to one lease and can multiplex lease renewals on one stream (`client/v3/lease.go:585–606`; `server/lease/lessor.go:347–350 @ v3.7.3`). If applications already use one lease per intended session, Chubby does not gain a factor equal to the number of keys. Its early event replies can increase KeepAlive turnover substantially. Long-poll exchanges and streaming messages also have different costs.
+**High confidence in the mechanisms; comparative cost unmeasured:** The comparison also depends on object grouping. etcd can attach many keys to one lease and can multiplex lease renewals on one stream (`client/v3/lease.go:585–606`; `server/lease/lessor.go:347–350 @ v3.7.3`). If applications already use one lease per intended session, Chubby does not gain a factor equal to the number of keys. Its early event replies can increase KeepAlive turnover substantially. Long-poll exchanges and streaming messages also have different costs.
 
-Chubby's ability to lengthen lease extensions under load reduces renewal frequency, but also lengthens the period for which an unresponsive holder may retain rights. This is explicit load control with a failure-recovery tradeoff, not a free performance gain (§3, p. 10; `doc/chubby-osdi06.md:352`).
+**High confidence — consequence of the documented extension policy:** Chubby's ability to lengthen lease extensions under load reduces renewal frequency, but also lengthens the period for which an unresponsive holder may retain rights. This is explicit load control with a failure-recovery tradeoff, not a free performance gain (§3, p. 10; `doc/chubby-osdi06.md:352`).
 
 The paper's name-service discussion makes the amortization argument especially clear: absent changes, a session's renewal traffic can maintain many cached names without polling each name separately. It also reports startup bursts that still overwhelmed the master and motivated batching related names. **Verified, High confidence:** Chubby §4.3, p. 12; `doc/chubby-osdi06.md:468–472`. Thus fewer steady-state polls do not eliminate cold-cache or correlated-restart load.
 
-Adopting server-controlled pacing in etcd would require changes at both ends. The Go sender advances `nextKeepAlive` when it receives a response. Once that time is overdue, it can send again on later passes through the sender loop while still awaiting a response. Holding replies therefore does not establish one outstanding request per session. Delaying the server's receive/renew/send loop can also delay other lease IDs on the same stream.
+**Moderate confidence — redesign assessment grounded in the following sender-loop behavior:** Adopting server-controlled pacing in etcd would require changes at both ends. The Go sender advances `nextKeepAlive` when it receives a response. Once that time is overdue, it can send again on later passes through the sender loop while still awaiting a response. Holding replies therefore does not establish one outstanding request per session. Delaying the server's receive/renew/send loop can also delay other lease IDs on the same stream.
 
 Longer server-granted lifetimes would need to remain valid through failover. The existing grant-time load-control TODO identifies the opportunity, but does not establish that delaying replies or returning a larger TTL is safe.
 
@@ -296,27 +298,27 @@ invalidation wait = max(d_i over affected cache holders)
 write completion includes invalidation wait + replicated modification work
 ```
 
-This is a model of dependency, not a measured latency formula. Invalidation work can proceed concurrently, so the wait need not be the sum of all round trips. Nevertheless, a single unavailable reader can make the writer wait for lease expiration. No finite bound follows under arbitrary repeated failures or continuing lease extensions.
+**Moderate confidence in this simplified timing model:** it describes the dependency, not measured latency. Invalidation work can proceed concurrently, so the wait need not be the sum of all round trips. Nevertheless, a single unavailable reader can make the writer wait for lease expiration. No finite bound follows under arbitrary repeated failures or continuing lease extensions.
 
 **Inference, High confidence:** Reader failures become part of write availability. Read-only clients that hold cached data matter even when they hold no locks. The library's conservative timeout makes that dependence safe; it does not make it cheap. Frequent writes to widely cached data can cause repeated invalidation, acknowledgments, uncached reads, and refills.
 
-etcd writes do not have a protocol requirement to wait for every watching application to acknowledge consumption. This preserves a useful form of independence between writes and observers. Its implementation can still couple them through resource contention, as the catch-up mutex shows. The two designs therefore have different intentional dependencies as well as different implementation risks.
+**High confidence — protocol distinction and inspected contention path:** etcd writes do not have a protocol requirement to wait for every watching application to acknowledge consumption. This preserves a useful form of independence between writes and observers. Its implementation can still couple them through resource contention, as the catch-up mutex shows. The two designs therefore have different intentional dependencies as well as different implementation risks.
 
 ### 6.3 Session integration concentrates state and failures
 
 The master must track possible cache holders and outstanding obligations. One process's session may encompass many handles, locks, and cached objects. Losing that session can invalidate all of them together; a library stalled on required invalidation work can lose more than a single subscription. This is a useful common failure boundary when the resources belong together, and an availability cost when unrelated activities share it. **Inference, Moderate confidence.**
 
-Similarly, fewer renewal objects do not imply constant-time expiration. Chubby must release locks and clean up session-associated state, including eligible ephemeral files. etcd explicitly deletes all attached keys during revocation (`server/lease/lessor.go:343–361 @ v3.7.3`). Neither the paper nor this inspection supplies an equivalent measured cleanup-cost comparison.
+**High confidence in the cleanup mechanisms; relative cost unmeasured:** Similarly, fewer renewal objects do not imply constant-time expiration. Chubby must release locks and clean up session-associated state, including eligible ephemeral files. etcd explicitly deletes all attached keys during revocation (`server/lease/lessor.go:343–361 @ v3.7.3`). Neither the paper nor this inspection supplies an equivalent measured cleanup-cost comparison.
 
-The resulting performance hypothesis is workload-specific: **for coordination workloads whose required result is a valid current view, a session-bound invalidation protocol can avoid work that a general mutation stream performs and an application must then interpret.**
+**Moderate confidence — unmeasured performance hypothesis:** The resulting performance hypothesis is workload-specific: **for coordination workloads whose required result is a valid current view, a session-bound invalidation protocol can avoid work that a general mutation stream performs and an application must then interpret.**
 
 ### 6.4 A simpler application needs a more capable library
 
 Chubby's Java discussion reports a delicate C++ client library comparable in size to its server. Rather than maintain a separate Java implementation or omit caching, Java applications used a protocol-conversion server exposing simpler RPCs corresponding to the client API. **Verified, High confidence:** Chubby §4.2, p. 12; `doc/chubby-osdi06.md:454–458`.
 
-The simpler application contract moves responsibility into the library or intermediary. Supporting another language requires reproducing that behavior or depending on the intermediary, which adds deployment and availability costs. jetcd's server-delegated locks illustrate partial reuse of an implementation (§4.4); its independent lease and watch code still needs separate scrutiny.
+**Moderate confidence — architectural cost assessment:** The simpler application contract moves responsibility into the library or intermediary. Supporting another language requires reproducing that behavior or depending on the intermediary, which adds deployment and availability costs. jetcd's server-delegated locks illustrate partial reuse of an implementation (§4.4); its independent lease and watch code still needs separate scrutiny.
 
-A shared session lifecycle can make the rules for expiration easier to specify and test. It does not make complex clients inherently safer or background-renewal bugs impossible.
+**Moderate confidence — design hypothesis:** A shared session lifecycle can make the rules for expiration easier to specify and test. It does not make complex clients inherently safer or background-renewal bugs impossible.
 
 ## 7. Failover must account for every usable cache
 
@@ -331,7 +333,7 @@ The bug supports the architectural argument while showing its limit:
 - **The invariant identifies the error:** the recovery barrier omitted a client that could still use its cache. The session design makes the missing obligation explicit.
 - **The implementation still failed:** fixing the consistency bug imposed an availability cost. A pending KeepAlive did not ensure correct bookkeeping.
 
-The revised design in the paper's §4.4 also changes proxy behavior. Proxies can manage sessions that the master does not know individually and can transfer associations during recovery (`doc/chubby-osdi06.md:492`). A process therefore need not always have its own RPC blocked directly at the master. A trusted intermediary can maintain that relationship, provided it preserves each client's invalidation and lifetime obligations.
+**High confidence — described proxy mechanism:** The revised design in the paper's §4.4 also changes proxy behavior. Proxies can manage sessions that the master does not know individually and can transfer associations during recovery (`doc/chubby-osdi06.md:492`). A process therefore need not always have its own RPC blocked directly at the master. A trusted intermediary can maintain that relationship, provided it preserves each client's invalidation and lifetime obligations.
 
 **Assessment, Moderate confidence:** Chubby simplifies the application's contract by accepting substantial responsibility in the client library, master, and recovery protocol. It reduces the number of independently interpreted signals at the application boundary. It does not abolish the distributed state that makes those signals meaningful.
 
@@ -354,15 +356,15 @@ These are **design implications, Moderate confidence**, not a proposed wire-comp
 
 etcd already includes a cooperative cache layer, `client/v3/leasing`. It uses lease-attached ownership keys, watches, and transactions to coordinate local cached reads with writes. That makes it a concrete test of the design comparison: it supplies an invalidation protocol above the core KV API, but renewal remains independent of invalidation progress.
 
-The source audit supports five findings. **Confidence is High for the cited code paths and Moderate for failure executions that were not run.**
+The source audit supports five findings; each row separates code evidence from any unexecuted consequence.
 
 | Finding | Why it matters | Detailed evidence |
 |---|---|---|
-| Each auxiliary ownership key belongs to one cache owner's lease. | This differs from Chubby's tracking of multiple reader sessions; all writers must cooperate with the cache protocol. | [Appendix B.1](#b1-ownership-and-invalidation-protocol) |
-| Renewal can continue while the owner fails to acknowledge invalidation. | A writer can remain blocked indefinitely unless its deadline or another recovery action ends the wait. | [Appendix B.2](#b2-a-stalled-invalidation-can-block-a-writer-indefinitely) |
-| The local session check can remain open after server ownership expires. | A new cached read after a competing write may return stale data. The timing conditions matter. | [Appendix B.3](#b3-local-cache-validity-can-outlast-server-ownership) |
-| Cache acquisition and invalidation add replicated transactions. | One traced nonowner `Put` performs five transaction calls, including two identical data puts. This is a specific code path, not a general cost ratio. | [Appendix B.4](#b4-a-nonowner-put-can-perform-five-transaction-calls) |
-| `EvictRange` uses the range-start key instead of the loop key. | A lost reply after a committed range deletion can leave affected entries cached. This is a repairable implementation defect. | [Appendix B.5](#b5-evictrange-can-leave-affected-entries-cached) |
+| **High confidence — source-verified:** each auxiliary ownership key belongs to one cache owner's lease. | This differs from Chubby's tracking of multiple reader sessions; all writers must cooperate with the cache protocol. | [Appendix B.1](#b1-ownership-and-invalidation-protocol) |
+| **High confidence in the independent paths:** renewal can continue while the owner fails to acknowledge invalidation. | **Moderate confidence — unexecuted schedule:** a writer can remain blocked indefinitely unless its deadline or another recovery action ends the wait. | [Appendix B.2](#b2-a-stalled-invalidation-can-block-a-writer-indefinitely) |
+| **High confidence in the asynchronous check:** the local session check can remain open after server ownership expires. | **Moderate confidence — unexecuted schedule:** a new cached read after a competing write may return stale data. The timing conditions matter. | [Appendix B.3](#b3-local-cache-validity-can-outlast-server-ownership) |
+| **High confidence — source-verified:** cache acquisition and invalidation add replicated transactions. | **Moderate confidence in the unexecuted combined path:** one traced nonowner `Put` performs five transaction calls, including two identical data puts. This is a specific code path, not a general cost ratio. | [Appendix B.4](#b4-a-nonowner-put-can-perform-five-transaction-calls) |
+| **High confidence — source-verified:** `EvictRange` uses the range-start key instead of the loop key. | **Moderate confidence — unexecuted schedule:** a lost reply after a committed range deletion can leave affected entries cached. This is a repairable implementation defect. | [Appendix B.5](#b5-evictrange-can-leave-affected-entries-cached) |
 
 These findings show both the reach and the limits of composition. etcd's primitives can express cache coherence, but the layer must separately enforce renewal deadlines, invalidation progress, and correct eviction. Chubby puts those obligations into its session contract. Neither approach makes its implementation immune to bugs.
 
@@ -376,11 +378,11 @@ Three needs should be evaluated independently:
 | Consume every relevant retained mutation | Revision cursors, ordered replay, compaction handling, bounded buffering, and consumer processing position |
 | Expire stored records at a deadline | Retention semantics across failover, cleanup progress, and explicit limits on lifetime extension |
 
-Chubby's session design is particularly compelling for the first requirement and integrates ownership with it. etcd exposes primitives used for all three. Problems arise when an application assumes that satisfying one requirement—for example, continuing lease renewal—satisfies another.
+**Moderate confidence — architectural assessment:** Chubby's session design is particularly compelling for the first requirement and integrates ownership with it. etcd exposes primitives used for all three. Problems arise when an application assumes that satisfying one requirement—for example, continuing lease renewal—satisfies another.
 
-Independent leases retain useful choices about object lifetimes and failure domains. The design question is which higher-level guarantees the system and its supported libraries should provide together, and which combinations they should make difficult to misuse. Chubby demonstrates a particularly coherent choice for coordination; evaluating that choice separately from a general-purpose TTL facility makes the comparison more useful.
+**Moderate confidence — design assessment:** Independent leases retain useful choices about object lifetimes and failure domains. The design question is which higher-level guarantees the system and its supported libraries should provide together, and which combinations they should make difficult to misuse. Chubby demonstrates a particularly coherent choice for coordination; evaluating that choice separately from a general-purpose TTL facility makes the comparison more useful.
 
-Preserving a session through a leader outage and deleting a passive record at its original deadline are different service objectives. Chubby omits a general passive-TTL API, so it avoids combining those promises. It still needs to release a failed owner's locks and files eventually; repeated recovery extensions can postpone that work too.
+**High confidence in the service distinction; Moderate in the untested repeated-failover consequence:** Preserving a session through a leader outage and deleting a passive record at its original deadline are different service objectives. Chubby omits a general passive-TTL API, so it avoids combining those promises. It still needs to release a failed owner's locks and files eventually; repeated recovery extensions can postpone that work too.
 
 A separately persisted expiration deadline could clarify a TTL API. It would still require clock assumptions, an authority check, replicated deletion, and recovery rules. Moving expiration into a garbage-collection facility would not remove cleanup bursts or expiration bugs. **Moderate confidence — design assessment based on §§2.2 and 5.3.**
 
@@ -402,7 +404,7 @@ Without writer participation, a linearizable cached read needs a freshness barri
 
 etcd's current keepalive header does not provide that freshness barrier. The serving member fills it before renewal, including before a follower forwards the request. An ordinary watch progress response also reports local progress rather than quorum-verified freshness. The check that can suppress an explicit progress response examines the requesting stream's watchers, not every watcher on the member.
 
-**Evidence:** `server/etcdserver/api/v3rpc/lease.go:127–147 @ v3.7.3`; `server/etcdserver/api/v3rpc/watch.go:395–399`; `server/storage/mvcc/watchable_store.go:511–539 @ v3.7.3`. These limits constrain the proposed design; they do not remove its value for detecting a stalled observer.
+**Evidence — High confidence in the header and progress paths:** `server/etcdserver/api/v3rpc/lease.go:127–147 @ v3.7.3`; `server/etcdserver/api/v3rpc/watch.go:395–399`; `server/storage/mvcc/watchable_store.go:511–539 @ v3.7.3`. These limits constrain the proposed design; they do not remove its value for detecting a stalled observer.
 
 This also narrows the Kubernetes comparison. Adding invalidation barriers to API-server caches would make writes depend on the **actual caches of the affected keys**, and on the relevant timeout policy. A claim about every API server, every write, or specific throughput needs workload and cache-coverage evidence. Conversely, substituting periodic session bookmarks cannot by itself remove a request's linearizable-read barrier. The architectural tradeoff can be evaluated without assuming either a universal write-heavy workload or that every consumer needs every historical mutation.
 
@@ -479,7 +481,7 @@ The etcd tree contains `client/v3/leasing`, whose documented purpose is lineariz
 
 Here, a **cache owner** is the session allowed to keep a local cached value. It is distinct from an application's lock holder. The auxiliary key records that cache ownership and carries invalidation requests.
 
-| Step | Mechanism in etcd `v3.7.3` | Source |
+| Step | Mechanism in etcd `v3.7.3` (High confidence, source-verified) | Source |
 |---|---|---|
 | Obtain cache ownership | A transaction reads the data and creates an auxiliary key `<prefix>/<key>` attached to the cacher's session lease, provided the auxiliary key is absent and the data key has no native TTL lease. | `client/v3/leasing/kv.go:265–287` |
 | Monitor invalidation | After successful acquisition, a goroutine watches the auxiliary key for `REVOKE`. | `client/v3/leasing/kv.go:159–187`, `:323–335` |
@@ -489,9 +491,9 @@ Here, a **cache owner** is the session allowed to keep a local cached value. It 
 
 **Verified, High confidence:** this is exclusive ownership per auxiliary key and lease identity, not Chubby's directory of multiple independent reader sessions. A second session can read the value without obtaining cache ownership. Range and historical reads bypass caching (`client/v3/leasing/cache.go:189–209`; `client/v3/leasing/kv.go:301–338 @ v3.7.3`). The comparison assumes a common metadata prefix and distinct session leases; shared leases or a shared proxy require separate analysis.
 
-There is a logical watch and monitoring goroutine per acquisition, but not necessarily a separate gRPC stream or TCP connection. The Go watch client groups logical watches by outgoing context metadata (`client/v3/watch.go:330–346 @ v3.7.3`). Both bookkeeping and transport counts matter, and should not be conflated.
+**High confidence — source-derived resource use:** There is a logical watch and monitoring goroutine per acquisition, but not necessarily a separate gRPC stream or TCP connection. The Go watch client groups logical watches by outgoing context metadata (`client/v3/watch.go:330–346 @ v3.7.3`). Both bookkeeping and transport counts matter, and should not be conflated.
 
-The acknowledgment depends on the owner's watch **and** its subsequent delete; receipt of a watch message alone does not release the writer. Renewal has no corresponding acknowledgment condition. All participating writers must follow the auxiliary-key protocol. An ordinary `Put` bypassing that protocol can change the real key without invalidating the cached value, because the owner monitors the auxiliary key rather than that value. This is a cooperation requirement of the layer, not a failure of the core KV service.
+**High confidence — source-derived cooperation requirement:** The acknowledgment depends on the owner's watch **and** its subsequent delete; receipt of a watch message alone does not release the writer. Renewal has no corresponding acknowledgment condition. All participating writers must follow the auxiliary-key protocol. An ordinary `Put` bypassing that protocol can change the real key without invalidating the cached value, because the owner monitors the auxiliary key rather than that value. This is a cooperation requirement of the layer, not a failure of the core KV service.
 
 ### B.2 A stalled invalidation can block a writer indefinitely
 
@@ -506,9 +508,9 @@ Independent renewal permits this execution:
 
 This is an availability failure even if the owner still serves the old value consistently: the requested new value has not been committed. It is a more direct example of the hypothesis than merely observing that an arbitrary application watch can lag. Chubby's protocol makes a permanently unacknowledged invalidation incompatible with indefinitely retaining the session; this leasing protocol allows that combination.
 
-Separate stream placement can trigger the failure. etcd configures `round_robin` (`client/v3/internal/resolver/resolver.go:43–44 @ v3.7.3`), and gRPC selects a backend per RPC. Lease and watch RPCs can therefore use different available members. [Official gRPC load-balancing documentation](https://grpc.io/docs/guides/custom-load-balancing/#implementing-your-own-policy).
+**Moderate confidence in the unexecuted failure trigger; High in the routing mechanism:** Separate stream placement can trigger the failure. etcd configures `round_robin` (`client/v3/internal/resolver/resolver.go:43–44 @ v3.7.3`), and gRPC selects a backend per RPC. Lease and watch RPCs can therefore use different available members. [Official gRPC load-balancing documentation](https://grpc.io/docs/guides/custom-load-balancing/#implementing-your-own-policy).
 
-The same failure is possible with one endpoint if watch processing stalls while renewal continues. Choosing one endpoint does not, by itself, bound the wait by the lease TTL. The decisive condition is that renewal and invalidation can progress independently.
+**Moderate confidence — unexecuted partial-stall scenario:** The same failure is possible with one endpoint if watch processing stalls while renewal continues. Choosing one endpoint does not, by itself, bound the wait by the lease TTL. The decisive condition is that renewal and invalidation can progress independently.
 
 **What ends the wait:** the caller's context ends; renewal stops and the ownership key expires; the watch delivers `REVOKE`, including after cancellation and recovery; or another actor revokes the lease or deletes the ownership key. A finite caller deadline therefore bounds that call's wait. Not every network error produces this indefinite stall.
 
@@ -516,7 +518,7 @@ The same failure is possible with one endpoint if watch processing stalls while 
 
 The read path relies on an asynchronously updated session signal. `get` calls `readySession()` before consulting the cache, and that predicate checks whether `Session.Done()` is closed. It does not compare the current time with a conservative cache-validity deadline. Closing the session depends on the keepalive channel and the goroutine that drains it.
 
-**Evidence:** `client/v3/leasing/kv.go:301–311`, `:467–478 @ v3.7.3`; `client/v3/concurrency/session.go:57–76 @ v3.7.3`.
+**Evidence — High confidence in the local gate:** `client/v3/leasing/kv.go:301–311`, `:467–478 @ v3.7.3`; `client/v3/concurrency/session.go:57–76 @ v3.7.3`.
 
 Combining this with receipt-time-plus-TTL arithmetic and the periodic deadline sweep (§5.1) gives a specific candidate execution:
 
@@ -534,7 +536,7 @@ The existing `TestLeasingDisconnectedGet` stops the sole member and verifies an 
 
 ### B.4 A nonowner Put can perform five transaction calls
 
-A successful new ownership acquisition writes an auxiliary key, so a cacheable read can itself require a replicated write. That is an important cost difference from Chubby's volatile cache-holder bookkeeping. It is not true of every cache miss: range/historical/serializable reads and unsuccessful ownership attempts can follow other paths.
+**High confidence — source-derived transaction requirement:** A successful new ownership acquisition writes an auxiliary key, so a cacheable read can itself require a replicated write. That is an important cost difference from Chubby's volatile cache-holder bookkeeping. It is not true of every cache miss: range/historical/serializable reads and unsuccessful ownership attempts can follow other paths.
 
 For a single-key `Put` by a nonowner, the conceptual invalidation sequence is `REVOKE → owner deletion → data update`. Tracing the actual `put` loop reveals additional work. Assume one existing owner, a writer with no cached entry for the key, successful RPCs, no lease expiry, and no other writer or reacquisition:
 
@@ -550,7 +552,7 @@ The decisive branch is `wc == nil`. `leaseCache.Lock` returns `(nil, 0)` for an 
 
 **Evidence — High confidence in the branch trace; Moderate in the unexecuted end-to-end consequence:** `client/v3/leasing/cache.go:53–60`; `client/v3/leasing/kv.go:218–261`, `:413–420 @ v3.7.3`. Raft routing: `server/etcdserver/txn/txn.go:352–363`; `server/etcdserver/v3_server.go:326–376 @ v3.7.3`.
 
-Repeated identical puts still increment version and revision (`server/storage/mvcc/kvstore_txn.go:209–261 @ v3.7.3`). The second put is therefore observable and warrants a regression test. The inspected version-count test first acquires cache ownership, so it exercises a different branch (`tests/integration/clientv3/lease/leasing_test.go:321–362 @ v3.7.3`). No new test was executed, and no upstream issue was filed for this trace.
+**High confidence in mutation semantics; Moderate in this unexecuted duplicate-put schedule:** Repeated identical puts still increment version and revision (`server/storage/mvcc/kvstore_txn.go:209–261 @ v3.7.3`). The second put is therefore observable and warrants a regression test. The inspected version-count test first acquires cache ownership, so it exercises a different branch (`tests/integration/clientv3/lease/leasing_test.go:321–362 @ v3.7.3`). No new test was executed, and no upstream issue was filed for this trace.
 
 These are operation counts for a specified path, not a throughput ratio, disk-write amplification measurement, or count of physical `fdatasync` calls. They support the architectural point that representing coherence obligations as MVCC keys introduces consensus work; they do not establish a general “3× slower” comparison.
 
@@ -607,6 +609,6 @@ These narrow checks do not constitute a development-branch audit or a search for
 
 **The resulting simplification is an architectural judgment, with Moderate confidence.** Session-bound handles, locks, conservative cache validity, and explicit recovery give coordination applications a common contract. This can prevent the mistake of treating a healthy lease as proof of a current cache. It also lets applications that need current state avoid some of the replay and buffering work required by a mutation stream.
 
-The costs and limits are equally central. Writers may wait for slow or failed readers. Recovery must account for every still-valid cache, as Chubby's own failover bug demonstrates. External services still need fencing, and libraries can still mishandle generations, timeouts, or eviction. The etcd leasing audit illustrates those obligations; its unexecuted failure scenarios remain candidates for testing rather than measured production findings.
+**High confidence in the documented constraints; Moderate in the unexecuted etcd failure scenarios:** The costs and limits are equally central. Writers may wait for slow or failed readers. Recovery must account for every still-valid cache, as Chubby's own failover bug demonstrates. External services still need fencing, and libraries can still mishandle generations, timeouts, or eviction. The etcd leasing audit illustrates those obligations; its unexecuted failure scenarios remain candidates for testing rather than measured production findings.
 
-The useful direction for etcd is to define and support a complete session/cache contract: what may be cached, what must be acknowledged, when the client must stop using state, and how failover preserves those promises. Periodic freshness notifications can help detect a stalled observer, but cannot by themselves authorize arbitrary later linearizable cache reads. Whether an integrated invalidation protocol performs better should be tested on workloads that require the same semantics.
+**Moderate confidence — design recommendation:** The useful direction for etcd is to define and support a complete session/cache contract: what may be cached, what must be acknowledged, when the client must stop using state, and how failover preserves those promises. Periodic freshness notifications can help detect a stalled observer, but cannot by themselves authorize arbitrary later linearizable cache reads. Whether an integrated invalidation protocol performs better should be tested on workloads that require the same semantics.

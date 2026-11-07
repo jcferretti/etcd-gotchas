@@ -27,11 +27,11 @@
 
 ---
 
-## 1. Diagnosis: Why etcd `v3.7.3`'s Current WAL and Consensus Pipeline Bottleneck Write Throughput
+## 1. Diagnosis: Why etcd `v3.7.3`'s Current WAL and Consensus Pipeline Bottleneck Write Throughput (**High confidence**)
 
-In [storage-agy.md](storage-agy.md), we analyzed the right half of etcd's write path (`server/storage/backend` and `bbolt`). When we inspect the left half—`server/etcdserver/raft.go`, `server/storage/wal/`, `server/etcdserver/api/snap/`, and `server/storage/storage.go` at `v3.7.3` (`0a173d0410a9`)—we find **six structural bottlenecks** that cap write throughput and inflate tail latency even if `bbolt` were infinitely fast.
+In [storage-agy.md](storage-agy.md), we analyzed the right half of etcd's write path (`server/storage/backend` and `bbolt`). When we inspect the left half—`server/etcdserver/raft.go`, `server/storage/wal/`, `server/etcdserver/api/snap/`, and `server/storage/storage.go` at `v3.7.3` (`0a173d0410a9`)—we find **six structural bottlenecks** that cap write throughput and inflate tail latency even if `bbolt` were infinitely fast (**High confidence**).
 
-### 1.1 Bottleneck 1: Synchronous, Non-Pipelined `raftNode` Loop & Unbuffered `applyc` Coupling (`server/etcdserver/raft.go:146, 185-336 @ v3.7.3`)
+### 1.1 Bottleneck 1: Synchronous, Non-Pipelined `raftNode` Loop & Unbuffered `applyc` Coupling (`server/etcdserver/raft.go:146, 185-336 @ v3.7.3` — **High confidence**)
 
 Look at the exact order of operations inside `raftNode.start()` (`server/etcdserver/raft.go:185-336 @ v3.7.3`):
 
@@ -102,7 +102,7 @@ This creates a **tightly coupled lockstep barrier** between consensus, network r
 
 ---
 
-### 1.2 Bottleneck 2: The 4-Sync Segment Rotation Stall (`w.cut()`), `ext4`/`XFS` Unwritten-Extent Journal Commits, Startup `ZeroToEnd`, and `isTornEntry` Silent Truncation (`server/storage/wal/wal.go:566, 785-867`, `file_pipeline.go:81`, `decoder.go:126-148, 170-203 @ v3.7.3`)
+### 1.2 Bottleneck 2: The 4-Sync Segment Rotation Stall (`w.cut()`), `ext4`/`XFS` Unwritten-Extent Journal Commits, Startup `ZeroToEnd`, and `isTornEntry` Silent Truncation (`server/storage/wal/wal.go:566, 785-867`, `file_pipeline.go:81`, `decoder.go:126-148, 170-203 @ v3.7.3` — **High confidence**)
 
 Every time the active `.wal` file reaches `SegmentSizeBytes` (`64 MB`, `wal.go:55`), `w.Save()` calls `w.cut()` **synchronously on the `raftNode` goroutine while holding `w.mu.Lock()`** (`wal.go:1036`). Inside `w.cut()` (`wal.go:785-867 @ v3.7.3`), etcd executes:
 1. `w.tail().Seek(0, io.SeekCurrent)` and `w.tail().Truncate(off)` (`wal.go:787-794`) — modifying filesystem inode size metadata.
@@ -115,14 +115,14 @@ Every time the active `.wal` file reaches `SegmentSizeBytes` (`64 MB`, `wal.go:5
 8. `newTail.Close()` (`wal.go:848`), followed by `fileutil.LockFile(fpath, os.O_WRONLY, ...)` (`wal.go:850` — `open(2)` + `flock(2)`) and `newTail.Seek(off, io.SeekStart)`.
 9. Immediately wakes `filePipeline.run()` (`file_pipeline.go:90-105`), which creates the next `.tmp` file and calls `fileutil.Preallocate(64 MB)` on the same directory, contending with ongoing WAL `fdatasync`s for the filesystem journal (e.g., ext4 `jbd2` or XFS log).
 
-Why does `wal.WAL` perform this expensive file-creation/rename/directory-fsync dance every 64 MB? Because it encodes the starting Raft index in the **filename** (`%016x-%016x.wal`, `util.go:110 @ v3.7.3`) and uses zero-bytes (`l == 0`, `decoder.go:95 @ v3.7.3`) as its EOF sentinel! This design causes **three additional severe penalties**:
-- **Filesystem Journal Transaction Penalty on *Every* `fdatasync` (`fallocate` Unwritten-Extent Conversion):** `filePipeline.alloc()` (`server/storage/wal/file_pipeline.go:81 @ v3.7.3`) pre-allocates each new 64 MB `.tmp` file using `fileutil.Preallocate(f.File, fp.size, true)` (`client/pkg/fileutil/preallocate.go:27-36 @ v3.7.3`) $\to$ `preallocExtend` $\to$ `syscall.Fallocate(int(f.Fd()), 0, 0, sizeInBytes)` (`client/pkg/fileutil/preallocate_unix.go:25-27 @ v3.7.3`). On Linux `ext4` and `XFS`, `fallocate(mode 0)` allocates **unwritten extents** (flagged as uninitialized in the extent tree so reads return zeroes without disk I/O). Consequently, **every time `WAL.Save()` writes into a fresh 4 KiB block of an `fallocate`d WAL file and calls `fdatasync`**, the filesystem must convert that block's extent metadata from *unwritten* to *written*, which modifies filesystem metadata and forces `fdatasync` (`fs/ext4/fsync.c`, `xfs_inode_item.c`) to commit a full **filesystem journal transaction** (`jbd2` / XFS log) rather than a pure data flush! In 2025 Linux kernel benchmarks for `FALLOC_FL_WRITE_ZEROES`, 4 KiB synchronous writes + `fdatasync` into `fallocate(mode 0)` unwritten extents on NVMe achieved only **20.1k IOPS (167 MB/s)**, whereas overwriting already-written recycled blocks achieved **98.8k IOPS (772 MB/s — $4.9\times$ higher throughput)** because `fdatasync` skips the filesystem journal when extent state does not change. Because `v3.7.3` never recycles `.wal` files and instead `fallocate`s a fresh file every 64 MB, **every single WAL `fdatasync` in `v3.7.3` pays the unwritten-extent journal commit tax!**
-- **Startup `ZeroToEnd` Stall (`wal.go:563-568 @ v3.7.3`):** Using `l == 0` as the EOF sentinel forces `WAL.ReadAll()` on startup to call `fileutil.ZeroToEnd(w.tail().File)`, synchronously writing up to **64 MB of zeroes** before the server can finish booting.
-- **Silent Committed-History Truncation Bug on Zeroed Sectors (`decoder.go:126-148, 170-203 @ v3.7.3`):** When `WAL.ReadAll()` encounters either a protobuf unmarshal failure (`decoder.go:125-130 @ v3.7.3`) or `crc.ErrCRCMismatch` (`decoder.go:138-150 @ v3.7.3`) anywhere in the last `.wal` segment (`len(d.brs) == 1`), it calls `d.isTornEntry(data)` (`decoder.go:170-203`). `isTornEntry` splits `data` (`recBytes + padBytes`) across 512-byte sector boundaries and returns `true` if **any** 512-byte chunk is all zeroes—converting the error into `io.ErrUnexpectedEOF`! On startup (`openWALFromSnapshot` in `server/etcdserver/bootstrap.go:642-656 @ v3.7.3`), `io.ErrUnexpectedEOF` triggers `wal.Repair` (`server/storage/wal/repair.go:67-99 @ v3.7.3`), which **silently truncates the WAL at `lastOffset`** and boots cleanly. If a storage or firmware fault zeroes a 512-byte sector inside an *already-synced, already-committed* entry earlier in the last 64 MB segment, etcd `v3.7.3` misclassifies mid-log corruption as a torn tail write and silently truncates committed Raft entries (violating Raft's persistence invariant).
+Why does `wal.WAL` perform this expensive file-creation/rename/directory-fsync dance every 64 MB? Because it encodes the starting Raft index in the **filename** (`%016x-%016x.wal`, `util.go:110 @ v3.7.3`) and uses zero-bytes (`l == 0`, `decoder.go:95 @ v3.7.3`) as its EOF sentinel! This design causes **three additional severe penalties** (**High confidence**):
+- **Filesystem Journal Transaction Penalty on *Every* `fdatasync` (`fallocate` Unwritten-Extent Conversion — **High confidence** on mechanism; **Moderate confidence** on exact IOPS ratio on target NVMe):** `filePipeline.alloc()` (`server/storage/wal/file_pipeline.go:81 @ v3.7.3`) pre-allocates each new 64 MB `.tmp` file using `fileutil.Preallocate(f.File, fp.size, true)` (`client/pkg/fileutil/preallocate.go:27-36 @ v3.7.3`) $\to$ `preallocExtend` $\to$ `syscall.Fallocate(int(f.Fd()), 0, 0, sizeInBytes)` (`client/pkg/fileutil/preallocate_unix.go:25-27 @ v3.7.3`). On Linux `ext4` and `XFS`, `fallocate(mode 0)` allocates **unwritten extents** (flagged as uninitialized in the extent tree so reads return zeroes without disk I/O). Consequently, **every time `WAL.Save()` writes into a fresh 4 KiB block of an `fallocate`d WAL file and calls `fdatasync`**, the filesystem must convert that block's extent metadata from *unwritten* to *written*, which modifies filesystem metadata and forces `fdatasync` (`fs/ext4/fsync.c`, `xfs_inode_item.c`) to commit a full **filesystem journal transaction** (`jbd2` / XFS log) rather than a pure data flush! In 2025 Linux kernel benchmarks for `FALLOC_FL_WRITE_ZEROES`, 4 KiB synchronous writes + `fdatasync` into `fallocate(mode 0)` unwritten extents on NVMe achieved only **20.1k IOPS (167 MB/s)**, whereas overwriting already-written recycled blocks achieved **98.8k IOPS (772 MB/s — $4.9\times$ higher throughput)** because `fdatasync` skips the filesystem journal when extent state does not change. Because `v3.7.3` never recycles `.wal` files and instead `fallocate`s a fresh file every 64 MB, **every single WAL `fdatasync` in `v3.7.3` pays the unwritten-extent journal commit tax!**
+- **Startup `ZeroToEnd` Stall (`wal.go:563-568 @ v3.7.3` — **High confidence**):** Using `l == 0` as the EOF sentinel forces `WAL.ReadAll()` on startup to call `fileutil.ZeroToEnd(w.tail().File)`, synchronously writing up to **64 MB of zeroes** before the server can finish booting.
+- **Silent Committed-History Truncation Bug on Zeroed Sectors (`decoder.go:126-148, 170-203 @ v3.7.3` — **High confidence**):** When `WAL.ReadAll()` encounters either a protobuf unmarshal failure (`decoder.go:125-130 @ v3.7.3`) or `crc.ErrCRCMismatch` (`decoder.go:138-150 @ v3.7.3`) anywhere in the last `.wal` segment (`len(d.brs) == 1`), it calls `d.isTornEntry(data)` (`decoder.go:170-203`). `isTornEntry` splits `data` (`recBytes + padBytes`) across 512-byte sector boundaries and returns `true` if **any** 512-byte chunk is all zeroes—converting the error into `io.ErrUnexpectedEOF`! On startup (`openWALFromSnapshot` in `server/etcdserver/bootstrap.go:642-656 @ v3.7.3`), `io.ErrUnexpectedEOF` triggers `wal.Repair` (`server/storage/wal/repair.go:67-99 @ v3.7.3`), which **silently truncates the WAL at `lastOffset`** and boots cleanly. If a storage or firmware fault zeroes a 512-byte sector inside an *already-synced, already-committed* entry earlier in the last 64 MB segment, etcd `v3.7.3` misclassifies mid-log corruption as a torn tail write and silently truncates committed Raft entries (violating Raft's persistence invariant).
 
 ---
 
-### 1.3 Bottleneck 3: Double Protobuf Serialization & Triple Memory Copy Per Entry (`wal.go:974-983`, `encoder.go:66-140`, `pagewriter.go:56-99 @ v3.7.3`)
+### 1.3 Bottleneck 3: Double Protobuf Serialization & Triple Memory Copy Per Entry (`wal.go:974-983`, `encoder.go:66-140`, `pagewriter.go:56-99 @ v3.7.3` — **High confidence**)
 
 In `w.Save(st, ents)` (`wal.go:995-1037 @ v3.7.3`), for every single `raftpb.Entry`:
 1. `w.saveEntry(ents[i])` (`wal.go:976`) calls `b := pbutil.MustMarshalMessage(e)`, allocating a new heap `[]byte` per entry (even though a `TODO: add MustMarshalTo to reduce one allocation` has sat at line 975 since 2015).
@@ -131,7 +131,7 @@ In `w.Save(st, ents)` (`wal.go:995-1037 @ v3.7.3`), for every single `raftpb.Ent
 
 ---
 
-### 1.4 Bottleneck 4: Every-10,000-Entry Triple-`fdatasync` Stall on `applyAll` (`server/etcdserver/server.go:1215-1228, 2083-2137 @ v3.7.3`)
+### 1.4 Bottleneck 4: Every-10,000-Entry Triple-`fdatasync` Stall on `applyAll` (`server/etcdserver/server.go:1215-1228, 2083-2137 @ v3.7.3` — **High confidence**)
 
 Despite a comment at `server/etcdserver/server.go:1216 @ v3.7.3` reading `// TODO: Remove disk snapshot in v3.7`, every `DefaultSnapshotCount = 10,000` applied entries (`server.go:78`), the `applyAll` goroutine synchronously executes `s.snapshot(ep, true)` (`server.go:2083-2137`):
 1. Marshals cluster membership into legacy v2 JSON format (`GetMembershipInfoInV2Format`, `server.go:2085`).
@@ -143,14 +143,14 @@ Despite a comment at `server/etcdserver/server.go:1216 @ v3.7.3` reading `// TOD
 
 ---
 
-### 1.5 Bottleneck 5: O(N) Full-WAL Scans (`ValidSnapshotEntries`) and Runtime WAL Close/Reopen (`MinimalEtcdVersion`)
+### 1.5 Bottleneck 5: O(N) Full-WAL Scans (`ValidSnapshotEntries`) and Runtime WAL Close/Reopen (`MinimalEtcdVersion` — **High confidence**)
 
 - `ValidSnapshotEntries` (`wal.go:608-695 @ v3.7.3`) opens **every `.wal` file in the directory starting from file 0** (`openWALFilesFn(lg, walDir, names, 0, false)` at line 648) and decodes every record from the beginning of the earliest file just to locate `SnapshotType` and `StateType` records.
 - Worse, `storage.MinimalEtcdVersion()` (`server/storage/storage.go:109-128 @ v3.7.3`, introduced by commit `2e2963af6` on `main` / backported to `v3.7.3` as `23b61e6d9`, and invoked by the cluster version monitor in `server.go:2213`) calls `st.w.LatestSnapshotEntry()` (`wal.go:597`, scanning all WAL files from index 0) and then calls **`st.w.Reopen()` (`wal.go:263-269`), which calls `w.Close()` on the live WAL, stops `filePipeline`, releases all `flock` locks, re-reads all WAL entries since the last snapshot via `w.ReadAll()`, zeroes the tail to 64 MB, and spawns a new `filePipeline` at runtime!**
 
 ---
 
-### 1.6 Bottleneck 6: Double-WAL Write Amplification Across the Node
+### 1.6 Bottleneck 6: Double-WAL Write Amplification Across the Node (**High confidence**)
 
 If we merely replace `bbolt` with an LSM engine (`pebble` or `grocksdb`) while keeping `server/storage/wal`, every single key-value mutation is written sequentially to a write-ahead log **twice**:
 1. First as a `raftpb.Entry` in the Raft WAL (`server/storage/wal/`).
@@ -244,9 +244,9 @@ Static inspection of `go.etcd.io/raft/v3` `v3.7.0` and `server/etcdserver/raft.g
 
 ---
 
-### 3.2 Component 2: `RaftLogEngine` — Recycled, Group-Committed WAL Built on `pebble/record.LogWriter`
+### 3.2 Component 2: `RaftLogEngine` — Recycled, Group-Committed WAL Built on `pebble/record.LogWriter` (**High confidence**)
 
-We replace `server/storage/wal` (`wal.WAL`, `encoder`, `decoder`, `filePipeline`) and `server/etcdserver/api/snap` (`Snapshotter` `.snap` files) with a purpose-built **`RaftLogEngine`** package (`server/storage/raftlog/`) built on **`github.com/cockroachdb/pebble/record`**.
+We replace `server/storage/wal` (`wal.WAL`, `encoder`, `decoder`, `filePipeline`) and `server/etcdserver/api/snap` (`Snapshotter` `.snap` files) with a purpose-built **`RaftLogEngine`** package (`server/storage/raftlog/`) built on **`github.com/cockroachdb/pebble/record`** (**High confidence**).
 
 #### 1. Zero-Fsync Segment Rotation & Zero Unwritten-Extent Journal Commits via Pre-Written File Recycling (`logNum`)
 Why write a custom framing format from scratch when `cockroachdb/pebble/record` (`v2.1.7`) already provides CockroachDB's battle-tested WAL record layer?
@@ -435,9 +435,9 @@ Let us compare the exact I/O and CPU operations performed on the critical write 
 
 ---
 
-## 6. Touch Surface, Effort Estimation, and Phased Implementation Plan
+## 6. Touch Surface, Effort Estimation, and Phased Implementation Plan (**High confidence** on touch surface; **Moderate confidence** on LoC and schedule estimates)
 
-Because `server/storage/wal` is only imported by **5 non-test production files** in `server/` (`server/storage/storage.go`, `server/storage/schema/schema.go`, `server/verify/verify.go`, `server/etcdserver/bootstrap.go`, and `server/embed/util.go`, plus test helper `server/storage/wal/testing/waltesting.go`), the code touch surface for replacing the WAL is surprisingly well-contained.
+Because `server/storage/wal` is only imported by **5 non-test production files** in `server/` (`server/storage/storage.go`, `server/storage/schema/schema.go`, `server/verify/verify.go`, `server/etcdserver/bootstrap.go`, and `server/embed/util.go`, plus test helper `server/storage/wal/testing/waltesting.go`), the code touch surface for replacing the WAL is surprisingly well-contained (**High confidence**).
 
 | Phase / Subsystem | Key Files Modified or Added (`@ v3.7.3`) | Estimated LoC | Estimated Effort | Can Be Shipped & Tested Independently? |
 |---|---|---|---|---|

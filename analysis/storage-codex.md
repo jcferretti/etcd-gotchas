@@ -14,6 +14,8 @@
 
 No builds, tests, benchmarks, fault injections, or production changes were performed. This report contains no measurements of the team's workload and makes no numerical speedup prediction.
 
+**Confidence review:** 2026-11-06. Existing claims were reviewed for missing qualifications. Ratings distinguish source/API facts, proposed adapter behavior, and the already Low-confidence effort estimates. Targeted pinned-source checks added no implementation or benchmark results.
+
 ## 1. Recommendation and decision boundary
 
 **Proceed to bottleneck measurement and, if it supports the hypothesis, a Pebble prototype in an etcd fork. Do not yet commit to deploying a replacement backend.** There is enough code-level feasibility and upstream interest to justify that next step; there is insufficient evidence to say the replacement will solve this project's write problem. **Confidence: Moderate.**
@@ -79,15 +81,15 @@ Raft snapshots / log reclamation require a durable backend boundary.
 
 The proposal and waiter are in `server/etcdserver/v3_server.go:1059,1114`; Raft persistence and message ordering are in `server/etcdserver/raft.go:237,255`; the ordered apply loop is in `server/etcdserver/server.go:1892`. The Raft WAL synchronizes in `server/storage/wal/wal.go:869,995`. These paths remain with either engine. [E1–E3](#12-code-evidence-map)
 
-**Verified:** etcd does not require a new bbolt durable commit for every ordinary Put response. Its backend publishes buffered writes to readers and commits on a timer, operation threshold, or a forced boundary. Defaults are **100 ms** and **10,000 pending operations**; these are implementation settings, not predicted request latency or throughput. Backend deletes and some metadata operations cause earlier commits. [E4–E6](#12-code-evidence-map)
+**Verified, High confidence:** etcd does not require a new bbolt durable commit for every ordinary Put response. Its backend publishes buffered writes to readers and commits on a timer, operation threshold, or a forced boundary. Defaults are **100 ms** and **10,000 pending operations**; these are implementation settings, not predicted request latency or throughput. Backend deletes and some metadata operations cause earlier commits. [E4–E6](#12-code-evidence-map)
 
 This is why replacing “one synchronous B-tree write per request” with “one asynchronous LSM write per request” would be the wrong comparison. The baseline already amortizes backend synchronization and uses the Raft log for recovery of state not yet committed to bbolt. **Confidence: High.**
 
 ### 3.2 The on-disk key order is revision order
 
-etcd's MVCC layer—multi-version concurrency control, retaining key history by revision—keeps an in-memory B-tree mapping user keys to revisions. The backend `key` bucket maps an encoded **main revision/subrevision** to a serialized `mvccpb.KeyValue`. Revisions are encoded in big-endian order; a tombstone marker distinguishes deletion records. [E7–E9](#12-code-evidence-map)
+**High confidence — source-verified storage representation:** etcd's MVCC layer—multi-version concurrency control, retaining key history by revision—keeps an in-memory B-tree mapping user keys to revisions. The backend `key` bucket maps an encoded **main revision/subrevision** to a serialized `mvccpb.KeyValue`. Revisions are encoded in big-endian order; a tombstone marker distinguishes deletion records. [E7–E9](#12-code-evidence-map)
 
-Consequences verified from the code:
+**High confidence — consequences verified from the code:**
 
 - Updating random application keys still appends new revision keys to the backend. It does not overwrite the same physical backend key each time.
 - `UnsafeSeqPut` sets bbolt's bucket fill fraction to `0.9`, explicitly exploiting append-heavy access.
@@ -107,15 +109,15 @@ Evidence: `kvstore_txn.go:108,125,223,259,308,323`; `revision.go:23,83`; `index.
 | Raft log compaction/reclamation | Log history recoverable from a later durable state/snapshot | Still required; its durability dependency must remain correct. |
 | LSM compaction | Reorganizes sorted files and eventually discards superseded engine records and engine tombstones | Newly introduced background work; it does not know etcd's retention policy by itself. |
 
-bbolt **defragmentation** is different again: it rewrites retained data to reclaim file space. In `v3.7.3` it takes the backend write and read locks. [E12–E13](#12-code-evidence-map)
+**High confidence — pinned implementation:** bbolt **defragmentation** is different again: it rewrites retained data to reclaim file space. In `v3.7.3` it takes the backend write and read locks. [E12–E13](#12-code-evidence-map)
 
 **Do not implement MVCC compaction as `DeleteRange(all revisions <= R)`.** A key last written long before `R` may still be the current live value. `kvstore_compaction.go:30,53` obtains a set of revisions to retain and selectively deletes the rest. Because application revisions are separate physical LSM keys, the engine cannot infer that two such records are versions of the same application key. A native TTL or compaction filter would likewise be unsafe without an independently proved mapping of etcd semantics. **Confidence: High.** [E11](#12-code-evidence-map)
 
 ### 3.4 Current costs worth separating
 
-bbolt's ordinary durable transaction path writes dirty pages, synchronizes them, writes a metadata page, and synchronizes again (`tx.go:170,244,267,566,595 @ bbolt v1.5.0`). These calls happen per backend transaction, not per API write. On Linux, etcd sets `NoFreelistSync: true`, so a diagnosis assuming that every commit serializes the freelist would be wrong for this configuration. In-memory freelist work and recovery costs still deserve profiling. [E14–E15](#12-code-evidence-map)
+**High confidence — pinned commit and Linux configuration paths:** bbolt's ordinary durable transaction path writes dirty pages, synchronizes them, writes a metadata page, and synchronizes again (`tx.go:170,244,267,566,595 @ bbolt v1.5.0`). These calls happen per backend transaction, not per API write. On Linux, etcd sets `NoFreelistSync: true`, so a diagnosis assuming that every commit serializes the freelist would be wrong for this configuration. In-memory freelist work and recovery costs still deserve profiling. [E14–E15](#12-code-evidence-map)
 
-Backend `UnsafeDelete` currently forces a commit at unlock because the read overlay does not buffer deletions. MVCC history compaction uses such deletes and explicitly forces commits between chunks. Ordinary user deletion is usually a tombstone **put**, so it is important to distinguish these paths in a profile. Auth writes also explicitly commit. [E5, E11, E16](#12-code-evidence-map)
+**High confidence — source-verified commit triggers:** Backend `UnsafeDelete` currently forces a commit at unlock because the read overlay does not buffer deletions. MVCC history compaction uses such deletes and explicitly forces commits between chunks. Ordinary user deletion is usually a tombstone **put**, so it is important to distinguish these paths in a profile. Auth writes also explicitly commit. [E5, E11, E16](#12-code-evidence-map)
 
 **Inference — Moderate confidence:** an LSM adapter with correct delete visibility can remove some bbolt-specific synchronization pressure. A replacement that preserves every forced commit mechanically may leave much of this opportunity unrealized; one that removes them without re-establishing their visibility and durability purpose can corrupt state.
 
@@ -123,7 +125,7 @@ Backend `UnsafeDelete` currently forces a commit at unlock because the read over
 
 ### 4.1 There is a usable interface, but its contract extends beyond its signatures
 
-`backend.Backend`, `BatchTx`, and `ReadTx` provide a reasonable boundary. Most MVCC and metadata code already uses these interfaces. However, the implementation and configuration are bbolt-specific, and snapshot consumers assume a bbolt database file. [E4–E6, E17–E20](#12-code-evidence-map)
+**Moderate confidence in the proposed adapter boundary; High in the existing bbolt coupling:** `backend.Backend`, `BatchTx`, and `ReadTx` provide a reasonable boundary. Most MVCC and metadata code already uses these interfaces. However, the implementation and configuration are bbolt-specific, and snapshot consumers assume a bbolt database file. [E4–E6, E17–E20](#12-code-evidence-map)
 
 | Required behavior | Candidate implementation | Principal trap |
 |---|---|---|
@@ -137,7 +139,7 @@ Backend `UnsafeDelete` currently forces a commit at unlock because the read over
 
 For the first implementation, use **one database/keyspace**, with all bucket namespaces in it, for either candidate. This simplifies atomicity and lets the same logical encoding exercise both engines. Use an explicitly versioned encoding based on bucket names or a newly defined durable namespace registry—not the current in-memory numeric IDs. Preserve bucket existence and empty-bucket behavior for metadata and full-state hashing. **Proposal; Moderate confidence in this as the simplest starting point.**
 
-RocksDB column families are feasible later, but separate flush/recovery behavior adds proof obligations. Its API distinguishes flushing one family from an atomic multi-family flush. Single-keyspace correctness should be established before optimizing bucket placement. Pebble does not require column families to implement etcd buckets. [E21, E25](#12-code-evidence-map)
+**Moderate confidence in the integration assessment; High in the cited API distinction:** RocksDB column families are feasible later, but separate flush/recovery behavior adds proof obligations. Its API distinguishes flushing one family from an atomic multi-family flush. Single-keyspace correctness should be established before optimizing bucket placement. Pebble does not require column families to implement etcd buckets. [E21, E25](#12-code-evidence-map)
 
 ### 4.2 Preserve the durable applied-prefix invariant
 
@@ -145,7 +147,7 @@ The **consistent index**, etcd's backend metadata recording the Raft entry alrea
 
 For the recovered consistent index `I`, the recovered database must contain the corresponding complete state, including its metadata, rather than an arbitrary mixture of updates from different application boundaries. At each durable backend boundary, data and consistent-index advancement must agree atomically. The same requirement covers membership/configuration state and mutations outside ordinary KV writes. **Confidence: High.**
 
-Existing code deliberately coordinates the apply lock, in-memory consistent-index update, and precommit hook. The hook saves both the index and dirty Raft configuration state in the backend transaction. `server.go:2105` commits the backend before saving a disk Raft snapshot and releasing older WAL data. [E22–E24, E12](#12-code-evidence-map)
+**High confidence — source-verified persistence ordering:** Existing code deliberately coordinates the apply lock, in-memory consistent-index update, and precommit hook. The hook saves both the index and dirty Raft configuration state in the backend transaction. `server.go:2105` commits the backend before saving a disk Raft snapshot and releasing older WAL data. [E22–E24, E12](#12-code-evidence-map)
 
 This boundary has failed before: etcd's [v3.5 data-inconsistency postmortem](https://github.com/etcd-io/etcd/blob/v3.7.3/Documentation/postmortems/v3.5-data-inconsistency.md#L18) describes a race that persisted the index before its data, causing recovery to skip changes. It is historical evidence of the failure mechanism, not a claim that `v3.7.3` still has that defect.
 
@@ -160,14 +162,14 @@ Persisting data without the matching index can also cause incorrect replay, espe
 
 ### 4.3 Keep the engine WAL for the first prototype
 
-**Recommended starting design, not a proven implementation:** retain etcd's Raft WAL and enable the LSM engine's own WAL. Preserve serialized application. Publish logically complete batches with their corresponding metadata; synchronize the engine at the existing durability boundaries. There are two reasonable implementation paths:
+**Recommended starting design — Moderate confidence, not a proven implementation:** retain etcd's Raft WAL and enable the LSM engine's own WAL. Preserve serialized application. Publish logically complete batches with their corresponding metadata; synchronize the engine at the existing durability boundaries. There are two reasonable implementation paths:
 
 - Keep a correct read overlay over pending backend batches, committing a synchronous engine batch at existing commit boundaries. This stays closer to current batching but retains overlay complexity.
 - Apply complete, atomic batches to the engine with its WAL enabled but without synchronizing each batch; use engine snapshots for readers and a synchronized barrier at `ForceCommit` and other required durability boundaries. This can simplify publication but changes how the hooks and consistent index are associated with each engine batch.
 
 The second path needs particular care: every recoverable published batch must carry the appropriate metadata, and a background commit must not read an index for an unfinished application. Preserve the lock ordering and the distinction between application work and background compaction; do not move hooks by analogy alone.
 
-Pebble offers synchronous batch application and a WAL synchronization operation through `LogData(nil, Sync)`; its checkpoint options explicitly use that barrier. RocksDB supports atomic `Write` and synchronized writes; an empty synchronized write is documented to synchronize the WAL. The grocksdb binding also exposes `FlushWAL(true)`. The exact adapter barrier must serialize against writers and be verified against rollover, flush, close, and recovery. [E26–E29](#12-code-evidence-map)
+**High confidence — documented engine synchronization primitives:** Pebble offers synchronous batch application and a WAL synchronization operation through `LogData(nil, Sync)`; its checkpoint options explicitly use that barrier. RocksDB supports atomic `Write` and synchronized writes; an empty synchronized write is documented to synchronize the WAL. The grocksdb binding also exposes `FlushWAL(true)`. The exact adapter barrier must serialize against writers and be verified against rollover, flush, close, and recovery. [E26–E29](#12-code-evidence-map)
 
 **Why not disable the engine WAL immediately?** Raft can theoretically supply redo, but that does not automatically make arbitrary partially flushed engine state a valid Raft application prefix. The adapter would need to prove durable-prefix recovery across memtable flushes, metadata, engine manifests, checkpoint creation, and Raft log reclamation. A crash after the Raft log is discarded and before the replacement state is durable can lose acknowledged writes. Pebble's `DisableWAL` documentation explicitly warns about crash recovery. **Confidence: High about the hazard; Moderate that eliminating this log could eventually be safe under a separately designed protocol.** [E12, E27, E29](#12-code-evidence-map)
 
@@ -189,25 +191,25 @@ Pebble's lack of a general SQL-style transaction facility is not a blocker. etcd
 
 | Dimension | Pebble `v2.1.7` | grocksdb `v1.11.1` + RocksDB `v11.1.2` |
 |---|---|---|
-| Basic fit | Atomic batches, indexed batches, snapshots, ordered iterators, checkpoints, compression | Equivalent core capabilities exposed through Go bindings |
-| Language/build | Go engine with a supported non-cgo path | cgo plus a native RocksDB/C++ and compression-library build |
-| Lifetime management | Closers and explicit snapshot/iterator lifetime; still requires discipline | Native options, batches, slices, iterators, snapshots, and database handles require explicit cleanup |
-| Instrumentation | Go-side metrics/events and more direct integration with Go profiling | Must combine Go, wrapper, native engine, allocator, and OS measurements |
-| Tuning scope | Subset focused on CockroachDB's needs | Broader native feature set; wrapper coverage must be checked per feature |
-| Deployment burden | Smaller native dependency burden; non-cgo build can simplify cross-compilation | Reproducible native build, compiler/ABI and linking choices, native security updates, platform testing |
-| Reuse advantage | Strong default for an etcd/Go team | Stronger if the team already operates, tunes, packages, and debugs RocksDB |
+| Basic fit — High confidence in the exposed primitives | Atomic batches, indexed batches, snapshots, ordered iterators, checkpoints, compression | Equivalent core capabilities exposed through Go bindings |
+| Language/build — High confidence | Go engine with a supported non-cgo path | cgo plus a native RocksDB/C++ and compression-library build |
+| Lifetime management — High confidence | Closers and explicit snapshot/iterator lifetime; still requires discipline | Native options, batches, slices, iterators, snapshots, and database handles require explicit cleanup |
+| Instrumentation — Moderate confidence in integration effort | Go-side metrics/events and more direct integration with Go profiling | Must combine Go, wrapper, native engine, allocator, and OS measurements |
+| Tuning scope — High confidence in documented feature scope | Subset focused on CockroachDB's needs | Broader native feature set; wrapper coverage must be checked per feature |
+| Deployment burden — Moderate confidence | Smaller native dependency burden; non-cgo build can simplify cross-compilation | Reproducible native build, compiler/ABI and linking choices, native security updates, platform testing |
+| Reuse advantage — Moderate confidence, team-dependent | Strong default for an etcd/Go team | Stronger if the team already operates, tunes, packages, and debugs RocksDB |
 | Expected overall integration risk | Lower of these two, **Moderate confidence** | Higher unless native expertise already exists, **Moderate confidence** |
 | Expected throughput winner | **Unknown** | **Unknown** |
 
 Pebble's release notes describe production use in CockroachDB; this supports the maturity of the engine, not of a hypothetical etcd adapter. Its scope and APIs are documented in the pinned source. **Confidence: High that upstream makes this production-use statement; Moderate when transferring that experience to this integration.** [Pebble release](https://github.com/cockroachdb/pebble/releases/tag/v2.1.7), [E25–E27](#12-code-evidence-map)
 
-Calling Pebble “pure Go” needs qualification: the inspected version has both cgo and non-cgo implementations for allocation and Zstandard compression. It can avoid a native RocksDB dependency, but a build must explicitly record `CGO_ENABLED` and relevant build tags. Comparing native-compression and Go-compression builds without recording that difference would confound the result. [E33](#12-code-evidence-map)
+**High confidence — cited build alternatives:** Calling Pebble “pure Go” needs qualification: the inspected version has both cgo and non-cgo implementations for allocation and Zstandard compression. It can avoid a native RocksDB dependency, but a build must explicitly record `CGO_ENABLED` and relevant build tags. Comparing native-compression and Go-compression builds without recording that difference would confound the result. [E33](#12-code-evidence-map)
 
-grocksdb's `Put` into a write batch itself crosses cgo; one final batch write does not reduce the entire operation to one language-boundary crossing. Its indexed batches provide merged reads and iterators, so functionality is available. **Inference — Moderate confidence:** per-operation wrapper overhead is more consequential for tiny, cache-resident records than for large writes dominated by storage. No overhead figure or end-to-end penalty is established here. [E31–E32, E34](#12-code-evidence-map)
+**High confidence — source-verified binding calls:** grocksdb's `Put` into a write batch itself crosses cgo; one final batch write does not reduce the entire operation to one language-boundary crossing. Its indexed batches provide merged reads and iterators, so functionality is available. **Inference — Moderate confidence:** per-operation wrapper overhead is more consequential for tiny, cache-resident records than for large writes dominated by storage. No overhead figure or end-to-end penalty is established here. [E31–E32, E34](#12-code-evidence-map)
 
-The wrapper README lists missing portions of the native C API, including several event/background-error callbacks. That does not establish an unusable engine, but observability and error handling may require wrapper additions. Treat RocksDB and grocksdb as two maintained dependencies, and budget accordingly. [grocksdb README:68 @ v1.11.1](https://github.com/linxGnu/grocksdb/blob/v1.11.1/README.md#L68)
+**High confidence — documented wrapper coverage:** The wrapper README lists missing portions of the native C API, including several event/background-error callbacks. That does not establish an unusable engine, but **Moderate confidence — integration forecast:** observability and error handling may require wrapper additions. Treat RocksDB and grocksdb as two maintained dependencies, and budget accordingly. [grocksdb README:68 @ v1.11.1](https://github.com/linxGnu/grocksdb/blob/v1.11.1/README.md#L68)
 
-Pebble v2 does not directly open modern RocksDB databases; nor does either engine open a bbolt database. Do not plan an engine switch or rollback around assumed on-disk compatibility. Pebble format-major upgrades can also be irreversible. [Pebble README:87,123 @ v2.1.7](https://github.com/cockroachdb/pebble/blob/v2.1.7/README.md#L87)
+**High confidence — documented format restrictions:** Pebble v2 does not directly open modern RocksDB databases; nor does either engine open a bbolt database. Do not plan an engine switch or rollback around assumed on-disk compatibility. Pebble format-major upgrades can also be irreversible. [Pebble README:87,123 @ v2.1.7](https://github.com/cockroachdb/pebble/blob/v2.1.7/README.md#L87)
 
 ## 6. Theoretical performance impact
 
@@ -253,7 +255,7 @@ overall service-time speedup = 1 / ((1 - f) + f/s)
 
 For illustration, `f = 0.20, s = 4` gives about `1.18×`; `f = 0.70, s = 4` gives about `2.11×`. These are arithmetic examples, **not measurements or forecasts**. The model is only an approximation: stages overlap, shared-device contention changes, and queueing near saturation can amplify tail-latency effects. **Confidence: High in the arithmetic; Moderate in its use for initial reasoning.**
 
-A more useful capacity model is the minimum sustainable rate across quorum/WAL, ordered apply, backend maintenance, network, and client resources. A faster backend only moves the limit if it is the bottleneck or materially frees resources used by that bottleneck. Adding LSM write concurrency cannot independently parallelize etcd's ordered application loop. [E1–E3, E7](#12-code-evidence-map)
+**Moderate confidence — simplified bottleneck model:** A more useful capacity model is the minimum sustainable rate across quorum/WAL, ordered apply, backend maintenance, network, and client resources. A faster backend only moves the limit if it is the bottleneck or materially frees resources used by that bottleneck. Adding LSM write concurrency cannot independently parallelize etcd's ordered application loop. [E1–E3, E7](#12-code-evidence-map)
 
 ### 6.4 Lower-cost comparisons worth retaining
 
@@ -266,7 +268,7 @@ Before attributing all gain to a new engine, compare against an appropriately co
 - Compression at the application's value boundary if payloads allow it. Unlike SST-only compression, this can also reduce client and Raft payloads, but requires a compatible value encoding and coordinated readers.
 - The upstream non-blocking defrag work if maintenance pauses, rather than sustained write cost, are the main problem.
 
-These are candidate comparisons, not changes authorized or performed in this pass. Sharding into multiple etcd clusters could increase aggregate capacity, but changes cross-shard transaction and revision semantics; it belongs to a separate architectural decision.
+These are candidate comparisons, not changes authorized or performed in this pass. **Moderate confidence — separate architectural hypothesis:** sharding into multiple etcd clusters could increase aggregate capacity, but changes cross-shard transaction and revision semantics; it belongs to a separate architectural decision.
 
 ## 7. Operational risks that make this more than an adapter
 
@@ -274,11 +276,11 @@ These are candidate comparisons, not changes authorized or performed in this pas
 
 There are three distinct concepts: an engine read snapshot, an etcd/Raft recovery boundary, and a portable backup or peer snapshot stream. They must refer to compatible state, but they are not interchangeable.
 
-Current code exports a bbolt read transaction, receives snapshot data as a synchronized single file, and renames that file into the backend location. `etcdutl snapshot status` opens bbolt directly; restore also manipulates logical metadata and revisions. The maintenance stream adds an integrity digest. [E4, E17–E20](#12-code-evidence-map)
+**High confidence — pinned snapshot/tool paths:** Current code exports a bbolt read transaction, receives snapshot data as a synchronized single file, and renames that file into the backend location. `etcdutl snapshot status` opens bbolt directly; restore also manipulates logical metadata and revisions. The maintenance stream adds an integrity digest. [E4, E17–E20](#12-code-evidence-map)
 
-Both candidates have checkpoints, but an engine checkpoint is a collection of files, including manifests and potentially WALs. It is not automatically a stream in etcd's expected format. For either engine the implementation must bind the checkpoint to the correct applied state, preserve all metadata, package it, verify it, durably install it, and recover safely from interruption. Directory and manifest synchronization matter as well as file synchronization. [E28, E37](#12-code-evidence-map)
+**High confidence in the documented file-based checkpoints; Moderate in the proposed integration obligations:** Both candidates have checkpoints, but an engine checkpoint is a collection of files, including manifests and potentially WALs. It is not automatically a stream in etcd's expected format. For either engine the implementation must bind the checkpoint to the correct applied state, preserve all metadata, package it, verify it, durably install it, and recover safely from interruption. Directory and manifest synchronization matter as well as file synchronization. [E28, E37](#12-code-evidence-map)
 
-Two designs are credible:
+**Moderate confidence in these proposed snapshot mappings:** two designs are credible, but neither is implemented or validated here:
 
 | Design | Advantage | Cost / limitation |
 |---|---|---|
@@ -308,7 +310,7 @@ An old bbolt file becomes stale as soon as the new backend accepts writes. Retur
 
 ### 7.4 Quotas, hashes, and maintenance contracts
 
-The current quota checks `Backend.Size()` plus an estimated request cost. The default is 2 GiB; 8 GiB is a suggested maximum that produces a warning when exceeded, not an absolute engine-addressing limit. [E38](#12-code-evidence-map)
+**High confidence — source-verified quota policy:** The current quota checks `Backend.Size()` plus an estimated request cost. The default is 2 GiB; 8 GiB is a suggested maximum that produces a warning when exceeded, not an absolute engine-addressing limit. [E38](#12-code-evidence-map)
 
 An LSM adapter needs separate definitions and metrics for logical retained bytes, live SST bytes, WAL bytes, obsolete/pinned files, checkpoint space, and temporary compaction headroom. An estimate of logical bytes alone cannot prevent disk-full during compaction. Preserve the configured quota's documented meaning or version the behavior explicitly; compression is not a reason to silently relax protection.
 
@@ -396,7 +398,7 @@ Do not interpret more Put QPS as success if reads, watch lag, follower catch-up,
 
 Use either the production auto-compaction configuration or the tool's compaction flags, not both accidentally. Increase duration/repeat count until the system has traversed representative retention and engine-compaction cycles and resource/backlog trends stabilize; a fixed operation count is not proof of steady state. Repeat sufficiently to expose variability, report all runs and failure cases, and randomize candidate order where feasible.
 
-**Two verified tool limitations affect this decision:**
+**High confidence — two verified tool limitations affect this decision:**
 
 1. `put.go:86` generates one value and reuses it for every operation; `txn_put.go:76` does likewise. Even if that value was initially random, repetition across records can be highly compressible. Such a test cannot establish the production compression benefit. Add seeded, distinct per-record data and a representative payload corpus, or replay the application's actual value-generation distribution.
 2. `put.go:97–101` waits on the rate limiter and then starts the latency timer around the RPC. Its fixed worker pool does not measure delay from an independent intended arrival time when overloaded. For SLO validation, record intended-arrival-to-completion latency or use a suitably instrumented load driver, along with errors and achieved rate. Otherwise queueing outside the measured RPC can be hidden.
@@ -455,7 +457,7 @@ The production work divides into:
 - Differential, robustness, crash, sustained-load, and recovery testing.
 - Packaging, rollout, rollback, documentation, and ongoing upstream integration.
 
-grocksdb adds native dependency packaging, explicit resource/error auditing, mixed Go/native diagnostics, and possibly wrapper work. Existing RocksDB expertise could substantially narrow the difference. Conversely, a zero-downtime stock-to-fork rollout, many supported platforms, changing the MVCC key layout, or eliminating the engine WAL can push either project beyond these ranges.
+**Moderate confidence in added integration work; Low in its effect on the planning ranges:** grocksdb adds native dependency packaging, explicit resource/error auditing, mixed Go/native diagnostics, and possibly wrapper work. Existing RocksDB expertise could substantially narrow the difference. Conversely, a zero-downtime stock-to-fork rollout, many supported platforms, changing the MVCC key layout, or eliminating the engine WAL can push either project beyond these ranges.
 
 No numerical estimate for continuing maintenance is defensible from this pass. The fork needs named owners after launch: etcd security/backport intake, engine format upgrades, regression qualification, incident diagnosis, and release artifacts remain permanent responsibilities.
 
@@ -472,7 +474,7 @@ Recommended implementation sequence if later measurements justify it:
 5. Establish continuous upstream rebase and test jobs; retain regression coverage for bbolt as well as the new engine. Qualify every etcd/engine upgrade together.
 6. Consider a RocksDB implementation if Pebble fails a relevant requirement or measurements justify the extra native integration cost. Do not incur two production backend maintenance burdens merely to obtain the first comparison.
 
-Upstream #22332 means some decoupling/testing work may become reusable; re-check it before building competing infrastructure. Upstream adoption is not assured. No repository was forked, pushed, or proposed for upstream contribution in this pass.
+**Moderate confidence — possible reuse opportunity, not an adoption forecast:** Upstream #22332 means some decoupling/testing work may become reusable; re-check it before building competing infrastructure. Upstream adoption is not assured. No repository was forked, pushed, or proposed for upstream contribution in this pass.
 
 ## 11. Unresolved inputs and conditions that could change the recommendation
 

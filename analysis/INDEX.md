@@ -18,6 +18,9 @@ Files sharing a prefix (`chubby-perspectives-`, `etcd-issues-and-mitigations-`,
 by different tools. Some were later revised using ideas from their peers;
 each such file says so.
 
+On 2026-11-06 Codex and Antigravity reviewed all their `-codex` and `-agy`
+files and added or revised claim-level confidence tags (`../log.md`).
+
 Exceptions: the `*-critique-claude.md` files are not further analyses.
 - `leases-critique-claude.md` records which claims from the peer lease
   analyses Claude rejected or qualified, and why.

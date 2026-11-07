@@ -255,3 +255,19 @@ recorded here (`AGENTS.md` §9, rule 1).
   in place, `publish/` absent, the noreply address on the commit, every other
   file identical to `origin`, and no denylisted text in any object. To update
   it, push to `origin`, then run `publish/publish-github.sh --push`.
+- 2026-11-06: `~/.codex/AGENTS.md` and `~/.gemini/GEMINI.md` installed as copies
+  of `~/.claude/CLAUDE.md`, so all three tools load the user's rules; loading
+  verified for both (`codex debug prompt-input`; a one-shot `agy --print` run).
+  Copy them again after editing `CLAUDE.md`.
+- 2026-11-06: Confidence review, at the user's request: Codex and Antigravity
+  reviewed their 12 `-codex` and `-agy` files and added or revised claim-level
+  High / Moderate / Low tags. Not only tags: some claims were reworded to
+  separate verified mechanisms from inference, several levels went from High
+  to Moderate (`wal-replacement-codex.md`,
+  `etcd-issues-and-mitigations-codex.md`), and the fence proposed at
+  `leases-agy.md:550` now compares `proposal.LeaderTerm < entry.Term`. The
+  `-agy` files also gained tags in headings and confidence columns in tables.
+  Claude Code checked structure only, not the ratings: table columns, internal
+  anchors, Chubby citation counts, line references from other files, and the
+  denylist. On the user's instruction it also shortened the `Confidence review`
+  line in `storage-codex.md` and `wal-replacement-codex.md`.
