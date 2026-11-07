@@ -73,16 +73,16 @@ A common misconception is that random user keys (`Put("user/9f8a...", val)`) cau
 3. **Append-only `UnsafeSeqPut`:** Because `(Main, Sub)` increases strictly monotonically with every Raft command applied, both `storeTxnWrite.put` (`kvstore_txn.go:259 @ v3.7.3`) and `storeTxnWrite.delete` (`kvstore_txn.go:323 @ v3.7.3`) call `tw.tx.UnsafeSeqPut(schema.Key, ibytes, d)`. Inside `server/storage/backend/batch_tx.go:108-115 @ v3.7.3`, `UnsafeSeqPut` sets `bucket.FillPercent = 0.9` on the `bbolt` bucket and appends exclusively to the rightmost leaf page of the B+tree.
 4. **Client reply before `bbolt` commit:** When `uberApplier.Apply` finishes applying an entry, `s.applyV3.Apply` returns and the server immediately triggers `s.w.Trigger(id, resp)` (`server/etcdserver/server.go:1236, 2048 @ v3.7.3`), unblocking the client's gRPC handler **before** the 100ms background `bbolt` commit runs—*unless* the batch limit (`10,000`) is reached or `pendingDeleteOperations > 0`.
 
-> **Condition under which replacing `bbolt` fails to improve write performance (High confidence):**
+> **Condition under which replacing `bbolt` fails to improve write performance:**
 > If your workload consists primarily of small `Put`/`DeleteRange` operations, has a total `bbolt` database size under ~1 GiB (fitting comfortably in OS page cache), has low lease revocation churn, and exhibits high `etcd_disk_wal_fsync_duration_seconds` relative to `etcd_disk_backend_commit_duration_seconds`, then your bottleneck is **Raft WAL `fdatasync` latency or single-leader Raft replication**. Replacing `bbolt` with `pebble` or `grocksdb` does not touch `server/storage/wal/` and will not speed up that workload.
 
 ---
 
-### 1.2 The Five Mechanisms Where `bbolt` *Does* Bottleneck Write-Heavy Workloads (**High confidence**)
+### 1.2 The Five Mechanisms Where `bbolt` *Does* Bottleneck Write-Heavy Workloads
 
-When does `bbolt` become the dominant bottleneck in etcd `v3.7.3`? Static analysis of `server/storage/` reveals five concrete mechanisms (**High confidence**):
+When does `bbolt` become the dominant bottleneck in etcd `v3.7.3`? Static analysis of `server/storage/` reveals five concrete mechanisms:
 
-#### Mechanism 1: The `pendingDeleteOperations > 0` Synchronous Commit Trap (`batch_tx.go:335 @ v3.7.3` — **High confidence**)
+#### Mechanism 1: The `pendingDeleteOperations > 0` Synchronous Commit Trap (`batch_tx.go:335 @ v3.7.3`)
 In PR [#17119](https://github.com/etcd-io/etcd/pull/17119) (merged Dec 2023), etcd modified `batchTxBuffered.Unlock()` (`server/storage/backend/batch_tx.go:308-340 @ v3.7.3`):
 
 ```go
@@ -120,28 +120,28 @@ While PR #17119 was motivated by rare cluster membership changes (`UnsafeDelete`
 | **`Maintenance.Downgrade`** (when downgrading storage schema from `v3.6` to `v3.5`) | `server/etcdserver/api/v3rpc/maintenance.go:322` (`maintenanceServer.Downgrade`) | `server/etcdserver/adapters.go:84` $\to$ `server/storage/schema/migration.go:82` $\to$ `server/storage/schema/actions.go:48` (`deleteKeyAction.unsafeDo` $\to$ `tx.UnsafeDelete(Meta, MetaStorageVersionName)`) | `meta` | Rare (cluster version downgrade). |
 | **Offline CLI Tools** (`etcdutl snapshot restore` / `etcdutl migrate`) | Offline CLI only (not gRPC) | `server/storage/schema/membership.go:69, 130, 139` (`TrimClusterFromBackend` $\to$ `UnsafeDeleteBucket(Cluster)`; `TrimMembershipFromBackend` $\to$ `UnsafeDelete(Members/MembersRemoved, k)`); `server/storage/schema/version.go:66` (`UnsafeClearStorageVersion`) | `cluster`, `members`, `members_removed`, `meta` | Offline only. |
 
-#### Mechanism 2: Mutual Exclusion Between `applyEntries`, `readTx`, and `bbolt.Tx.Commit()` (**High confidence**)
+#### Mechanism 2: Mutual Exclusion Between `applyEntries`, `readTx`, and `bbolt.Tx.Commit()`
 Unlike LSM engines where writes append to a lock-free/sharded in-memory MemTable while background threads flush and compact immutable SSTables, `bbolt` is a **single-writer CoW B+tree**.
 - During `batchTxBuffered.unsafeCommit()` (`server/storage/backend/batch_tx.go:354-386 @ v3.7.3`), `batchTx.Mutex` is held across the entire `bbolt.Tx.Commit()` (`rerr = t.tx.Commit()` at line 378) **and** across `t.backend.readTx.mu.Lock()` (lines 364–380).
 - Consequently, while `bbolt` rebalances dirty B+tree nodes, spills dirty 4 KiB pages, writes random pages to the OS, and calls `fdatasync` twice (once for dirty data pages, once for the 4 KiB meta page), **the Raft `applyEntries` loop cannot apply any writes or linearizable read barriers**, and **new `ConcurrentReadTx()` callers cannot copy the read buffer** (`server/storage/backend/backend.go:254-269 @ v3.7.3`).
-- On multi-gigabyte databases where a single 100ms window accumulates thousands of dirty 4 KiB pages, `etcd_disk_backend_commit_duration_seconds` spikes from `<2ms` to `50ms–500ms+`, causing sawtooth latency spikes across all writes and reads (**High confidence** on lock contention mechanism; **Moderate confidence** on exact p99 spike range on target disk).
+- On multi-gigabyte databases where a single 100ms window accumulates thousands of dirty 4 KiB pages, `etcd_disk_backend_commit_duration_seconds` spikes from `<2ms` to `50ms–500ms+`, causing sawtooth latency spikes across all writes and reads (**Moderate confidence** on exact p99 spike range on target disk).
 
-#### Mechanism 3: Random 4 KiB CoW Write Amplification During MVCC Compaction (**High confidence**)
+#### Mechanism 3: Random 4 KiB CoW Write Amplification During MVCC Compaction
 When `Put` and `DeleteRange` append new revisions via `UnsafeSeqPut`, they write sequentially to the highest revision numbers. However, when MVCC compaction (`scheduleCompaction`) deletes superseded revisions from minutes or hours ago, those 17-byte revision keys live in **old, densely packed (90% full) 4 KiB leaf pages scattered across the entire `bbolt` file**.
 - Deleting a single 17-byte revision from an old 4 KiB page requires `bbolt` to copy the entire 4 KiB leaf page PLUS every 4 KiB ancestor branch page up to the root (`O(depth * 4 KiB)` write amplification per touched leaf subtree).
 - If compaction deletes 1,000 keys scattered across 600 distinct leaf pages, a single compaction batch of ~100 KiB of logical data can dirty `>2.5 MiB` of scattered 4 KiB pages and force a synchronous `fdatasync` every 10ms.
 
-#### Mechanism 4: Freelist Fragmentation and Stop-the-World `Defrag()` (**High confidence**)
+#### Mechanism 4: Freelist Fragmentation and Stop-the-World `Defrag()`
 As `bbolt` allocates new contiguous page extents for large transactions and frees scattered pages from old transactions, the file grows toward `--quota-backend-bytes` (default `2 GiB`, max recommended `8 GiB`, `server/storage/quota.go:32-38 @ v3.7.3`).
 - Even with `FreelistMapType` (`bbolt.FreelistMapType`, default in `server/storage/backend/backend.go:128 @ v3.7.3`), `bbolt` never shrinks its file on disk or compacts partially empty 4 KiB leaf pages across non-adjacent branches without an explicit `Defrag()`.
 - `backend.Defrag()` (`server/storage/backend/backend.go:476-614 @ v3.7.3`) acquires `b.batchTx.Lock()`, `b.mu.Lock()`, and `b.readTx.mu.Lock()`, opens a brand-new temporary `bbolt` file (`db.tmp`), iterates over every bucket and key to copy live data sequentially, syncs and closes both files, swaps them via `os.Rename`, and reopens the backend. During those seconds or minutes, the etcd member is completely unresponsive to reads and writes.
 
-#### Mechanism 5: `mmap` Page Fault Stalls and OS Dirty-Page Writeback Contention (**High confidence**)
+#### Mechanism 5: `mmap` Page Fault Stalls and OS Dirty-Page Writeback Contention
 `bbolt` memory-maps (`mmap`) the entire database file (`InitialMmapSize = 10 GiB` on 64-bit Linux, `server/storage/backend.go:31-47 @ v3.7.3`). If the database size approaches or exceeds available physical memory (or container cgroup memory limits), B+tree traversal during `UnsafeRange` (`rangeKeys`) or `UnsafeDelete` (compaction) triggers major page faults directly on the critical lock path.
 
 ---
 
-## 2. Code-Level Coupling Audit in etcd `v3.7.3` (**High confidence**)
+## 2. Code-Level Coupling Audit in etcd `v3.7.3`
 
 How tightly coupled is etcd `v3.7.3` to `bbolt`? Upstream issue [etcd#10321](https://github.com/etcd-io/etcd/issues/10321) (*Meta issue: Pluggable backend*) and `xiang90`'s prototype PR [etcd#10311](https://github.com/etcd-io/etcd/pull/10311) (*WIP: try out badger as an alternative backend*) show that etcd originally designed `server/storage/backend.Backend` as an abstraction layer, **but several `bbolt`-specific assumptions leak outside `server/storage/backend/`**.
 
@@ -162,9 +162,9 @@ Below is the complete, verified inventory of every `bbolt` touchpoint in `etcd @
 | `server/verify/verify.go:65-138` | `verifyConsistentIndex` calls `backend.NewDefaultBackend` on the data dir and reads `schema.Meta` via `Backend.ReadTx()`. | **Zero `bbolt` coupling** once `NewDefaultBackend` opens the new backend. |
 | `tools/etcd-dump-db/backend.go:1-178` | Diagnostic CLI tool importing `go.etcd.io/bbolt` directly to list buckets and iterate keys offline. | Must be updated to open the new backend or use `backend.Backend` interface. |
 
-### 2.1 Two Non-Obvious Traps Discovered in the Code Audit (**High confidence**)
+### 2.1 Two Non-Obvious Traps Discovered in the Code Audit
 
-#### Trap A: The Bucket Prefix Collision Bug in `server/storage/schema/bucket.go:42-58 @ v3.7.3` (**High confidence**)
+#### Trap A: The Bucket Prefix Collision Bug in `server/storage/schema/bucket.go:42-58 @ v3.7.3`
 In `bbolt`, each bucket is a separate nested B+tree with its own isolated keyspace. When `xiang90` prototyped Badger (an LSM engine without buckets) in PR [#10311](https://github.com/etcd-io/etcd/pull/10311), the prototype mapped `(bucket, key)` into a flat LSM keyspace via naive byte concatenation:
 ```go
 // FROM PR #10311 (BUGGY in etcd v3.7.3!):
@@ -194,7 +194,7 @@ If we concatenate `append(bucket.Name(), key...)` without a delimiter or length 
 
 **Required fix:** Encode every flat LSM key with either a single-byte Fixed Bucket ID (`uint8` 1..11, or `uint16`) or a length-prefixed/null-terminated bucket name (`<uint8(len(bucketName))><bucketName><key>`), since none of etcd's bucket names contain `\x00` and all have length $\le 15$ bytes. Using a 1-byte length prefix `<len(bucketName)><bucketName><key>` guarantees prefix-free isolation (by Kraft's inequality, fixed-length-prefixed strings are an instantaneous prefix code) while keeping human-readable bucket names in raw SSTable dumps.
 
-#### Trap B: The `(n % 512) == 32` Client Snapshot Checksum Invariant (**High confidence**)
+#### Trap B: The `(n % 512) == 32` Client Snapshot Checksum Invariant
 When a client calls `etcdctl snapshot save` (or uses `go.etcd.io/etcd/client/v3/snapshot.SaveWithVersion`), the server's `Maintenance.Snapshot` RPC (`server/etcdserver/api/v3rpc/maintenance.go:135-220 @ v3.7.3`) streams `snap.WriteTo(w)` followed by a 32-byte `sha256` checksum. On the receiving side, `client/v3/snapshot/v3_snapshot.go:35-39, 102 @ v3.7.3` checks:
 ```go
 func hasChecksum(n int64) bool {
@@ -242,7 +242,7 @@ Let us trace etcd's crash-recovery contract in `server/etcdserver/bootstrap.go:4
 
 **What happens if you set `DisableWAL: true` in `pebble` or `grocksdb`?**
 - If you disable the LSM's internal WAL (`pebble.NoSync` with `DisableWAL`), mutations sit in the LSM MemTable. If the MemTable fills up (e.g., 64 MiB) and flushes to an L0 SSTable in the background *mid-batch* or *out of step with `OnPreCommitUnsafe`*, or if a crash occurs when L0 SSTables have flushed partial batch state without the matching `consistent_index`, **the database violates atomic batch recovery (`consistent_index` no longer matches the exact prefix of applied Raft entries)**, causing silent data corruption or a fatal panic in `server/verify/verify.go:118 @ v3.7.3` (`consistent index > HardState.Commit` or missing MVCC keys)!
-- **Correct LSM Durability Configuration (High confidence):**
+- **Correct LSM Durability Configuration:**
   - **Keep the LSM WAL enabled**, and commit each `batchTx` as a single atomic `pebble.Batch` / `grocksdb.WriteBatch` (which includes the `OnPreCommitUnsafe` write to `meta/consistent_index`).
   - For periodic 100ms commits (`commit(false)`), use **`pebble.NoSync`** (`WriteOptions{Sync: false}`). Why is `NoSync` completely safe here?
     1. Because `pebble.Batch.Commit(pebble.NoSync)` writes the entire atomic batch record to the OS buffer cache in a single `write()` syscall. If the etcd process crashes (SIGKILL/panic), the OS kernel flushes dirty page cache buffers, preserving the atomic batch.
@@ -255,7 +255,7 @@ This design gives you **the best of both worlds**:
 
 ---
 
-### 3.3 Fixing `txBuffer` and `pendingDeleteOperations` with `pebble.IndexedBatch` (**High confidence**)
+### 3.3 Fixing `txBuffer` and `pendingDeleteOperations` with `pebble.IndexedBatch`
 
 In `v3.7.3`, etcd maintains its own custom read-your-own-writes buffer (`txWriteBuffer` and `txReadBuffer` in `server/storage/backend/tx_buffer.go`) because `bbolt` does not allow concurrent read transactions (`readTx`) to read uncommitted writes inside the active write transaction (`batchTx`). As shown in §1.2 (Mechanism 1), `txBuffer`'s lack of deletion tombstones forced PR [#17119](https://github.com/etcd-io/etcd/pull/17119) to add `if t.pendingDeleteOperations > 0 { t.commit(false) }`, turning every `LeaseRevoke` and compaction batch into a synchronous `bbolt` commit.
 
@@ -306,20 +306,20 @@ Let us compare the cost of those $N$ point lookups across the three engines:
 
 ---
 
-### 3.5 Startup Restoration (`mvcc.restore`) and Hash Verification (**High confidence**)
+### 3.5 Startup Restoration (`mvcc.restore`) and Hash Verification
 
 On server startup or snapshot recovery, `store.restore()` (`server/storage/mvcc/kvstore.go:322-432 @ v3.7.3`) rebuilds the in-memory `treeIndex` by scanning **every live revision** in `schema.Key` in chunks of `restoreChunkKeys = 10,000` (`UnsafeRange(schema.Key, min, max, 10000)`).
 - In an LSM engine, a full sequential forward scan over `schema.Key` in ascending `Revision` order is the optimal LSM access pattern (sequential merge iteration over SSTable blocks).
-- Similarly, `UnsafeHash` / `HashByRev` (`server/storage/backend/backend.go:349-400`, `server/storage/mvcc/hash.go:53-145 @ v3.7.3`) performs a sequential forward scan over all buckets (or over `schema.Key` up to `compactRevision`..`hashRevision`), feeding `(bucketName, key, value)` into `crc32.New(crc32.MakeTable(crc32.Castagnoli))`. Because `crc32` hashes the logical `(bucketName, key, value)` bytes—**not** physical B+tree pages—**a cluster with a `pebble` backend computes the exact same `Hash` and `HashByRev` digests as a `bbolt` backend** (**High confidence** — verified in `backend.go:381-395` and `mvcc/hash.go:116-135 @ v3.7.3`!).
+- Similarly, `UnsafeHash` / `HashByRev` (`server/storage/backend/backend.go:349-400`, `server/storage/mvcc/hash.go:53-145 @ v3.7.3`) performs a sequential forward scan over all buckets (or over `schema.Key` up to `compactRevision`..`hashRevision`), feeding `(bucketName, key, value)` into `crc32.New(crc32.MakeTable(crc32.Castagnoli))`. Because `crc32` hashes the logical `(bucketName, key, value)` bytes—**not** physical B+tree pages—**a cluster with a `pebble` backend computes the exact same `Hash` and `HashByRev` digests as a `bbolt` backend** (verified in `backend.go:381-395` and `mvcc/hash.go:116-135 @ v3.7.3`!).
   - *Implication:* You can even run a mixed rolling test where `HashKV` (`HashByRev`) is cross-verified between a standard `bbolt` node and a `pebble` node at the same revision!
 
 ---
 
-### 3.6 MVCC Compaction & Eliminating `Defrag()` (**High confidence**)
+### 3.6 MVCC Compaction & Eliminating `Defrag()`
 
 In `server/storage/mvcc/kvstore_compaction.go:35-99 @ v3.7.3`, `scheduleCompaction(compactMainRev int64, prevCompactRev int64)` scans `schema.Key` from `0` to `compactMainRev + 1`, checks `s.kvindex.keep(compactMainRev, keep)` to find Which revisions are still the latest generation of a live key, and calls `tx.UnsafeDelete(schema.Key, key)` on every superseded revision.
 
-With `pebble` (or `grocksdb`), compaction improves in three ways (**High confidence**):
+With `pebble` (or `grocksdb`), compaction improves in three ways:
 1. **Batching deletes without synchronous `fdatasync`:** Deleting 1,000 keys in `scheduleCompaction` writes 1,000 tiny 17-byte tombstones into the LSM batch (~20 KiB total) and commits with `pebble.NoSync` in `<100 µs`, instead of rewriting hundreds of scattered 4 KiB B+tree pages and calling `fdatasync`.
 2. **Range Tombstones (`DeleteRange`) for contiguous dead revision spans:** Between any two adjacent retained revisions $r_i < r_{i+1}$ in `keep` within `(prevCompactRev, compactMainRev]`, **every single revision in the open interval $(r_i, r_{i+1})$ is dead**. Instead of issuing thousands of individual `Delete(rev)` calls or scanning from `0` on every compaction (`kvstore_compaction.go:42` always starts from revision `0`!), an LSM backend can either start scanning from `prevCompactRev` or issue `DeleteRange` over dead revision spans.
 3. **Zero `Defrag()` downtime:** As LSM background compaction merges L0 $\to$ L1 $\to \dots \to$ L$k$, any revision key covered by a point or range tombstone at the bottommost level is physically dropped from the newly written SSTable, and the old SSTable file is unlinked from disk. `backend.Defrag()` becomes a lightweight manual `db.Compact(start, end, true)` (which runs concurrently with reads and writes without holding `batchTx.Lock()`!).
@@ -327,7 +327,7 @@ With `pebble` (or `grocksdb`), compaction improves in three ways (**High confide
 
 ---
 
-### 3.7 Snapshots (`backend.Snapshot`) & Multi-File Directory Management (**High confidence**)
+### 3.7 Snapshots (`backend.Snapshot`) & Multi-File Directory Management
 
 In `bbolt`, `backend.Snapshot()` (`server/storage/backend/backend.go:336-347 @ v3.7.3`) opens a read-only `*bbolt.Tx` and implements `WriteTo(w io.Writer)` via `s.tx.WriteTo(w)`. And `OpenSnapshotBackend` (`server/storage/backend.go:62-69 @ v3.7.3`) simply calls `os.Rename(snapPath, cfg.BackendPath())`.
 
@@ -390,12 +390,12 @@ You proposed that if the analysis and experiments show meaningful improvement, y
    - Why? In `v3.7.3`, `server/storage/backend/` is only ~1,700 lines across 5 files and changes rarely between minor releases. Keeping `bbolt` intact and isolating `pebble` into separate `pebble_*.go` files keeps your touch surface in existing etcd files under **~100 lines** (`server/storage/backend.go`, `server/storage/backend/backend.go`, `etcdutl/snapshot/v3_snapshot.go`), making rebasing from `v3.7.x` $\to$ `v3.8.x` mechanical.
 3. **Operational Risks of Running a Storage-Engine Fork in Production:**
    - **Physical snapshot incompatibility across `bbolt` and `pebble` members:** Because Raft snapshots in etcd (`server/etcdserver/snapshot_merge.go:39-84 @ v3.7.3`) stream the raw physical backend snapshot (`backend.Snapshot.WriteTo`) rather than logical KV pairs, a `bbolt` leader cannot send a physical Raft snapshot (`MsgSnap`) directly to a `pebble` follower unless `OpenSnapshotBackend` includes a one-way `bbolt`-file-to-`pebble`-directory converter!
-     - **Design recommendation for zero-downtime migration (High confidence):** Write a ~120-line converter inside `OpenSnapshotBackend` and `newBackend`: if `member/snap/db` (or the incoming `%016x.snap.db`) starts with the `bbolt` magic number (`0xED0CDAED` at offset `pageSize + 0`), open it read-only with `bbolt`, iterate all 10 buckets via `ForEach`, write every key-value pair into a new `pebble` directory, and atomically swap it! This single feature gives you **seamless live rolling upgrades from upstream `bbolt` etcd to your `pebble` fork** and **seamless migration back** if needed!
+     - **Design recommendation for zero-downtime migration:** Write a ~120-line converter inside `OpenSnapshotBackend` and `newBackend`: if `member/snap/db` (or the incoming `%016x.snap.db`) starts with the `bbolt` magic number (`0xED0CDAED` at offset `pageSize + 0`), open it read-only with `bbolt`, iterate all 10 buckets via `ForEach`, write every key-value pair into a new `pebble` directory, and atomically swap it! This single feature gives you **seamless live rolling upgrades from upstream `bbolt` etcd to your `pebble` fork** and **seamless migration back** if needed!
    - **Loss of upstream `bbolt` emergency surgery tools:** Operational playbooks that rely on `bbolt surgery` or raw `bbolt` page inspection will not work on `pebble` SSTables (replace with `pebble` CLI tools / updated `etcdutl`).
 
-### 5.2 Low-Effort Surgical Fixes to Test *Before* Replacing `bbolt` (**High confidence**)
+### 5.2 Low-Effort Surgical Fixes to Test *Before* Replacing `bbolt`
 
-Before committing 8–10 engineer-weeks to a `pebble` backend replacement, static code analysis of `v3.7.3` reveals **three surgical changes (< 150 LoC total)** that directly attack `bbolt`'s worst write stalls (**High confidence**):
+Before committing 8–10 engineer-weeks to a `pebble` backend replacement, static code analysis of `v3.7.3` reveals **three surgical changes (< 150 LoC total)** that directly attack `bbolt`'s worst write stalls:
 
 1. **Fix `txBuffer` to Support Deletion Tombstones (~80 LoC in `server/storage/backend/tx_buffer.go` and `batch_tx.go`):**
    - If your workload uses leases (`LeaseGrant`/`LeaseRevoke`/TTL expiration) or frequent MVCC compaction, PR [#17119](https://github.com/etcd-io/etcd/pull/17119)'s `if t.pendingDeleteOperations > 0 { t.commit(false) }` (`batch_tx.go:335 @ v3.7.3`) is forcing a synchronous `bbolt` `fdatasync` on **every single `LeaseRevoke` and every compaction batch**.
@@ -466,7 +466,7 @@ Run Experiment 2 (State B) under three storage placement configurations on the t
 3. **Simulated Zero-Cost WAL (`--wal-dir` on `tmpfs` RAM disk, `member/snap/db` on target disk):**
    Keep `member/snap/db` on the real disk and put `--wal-dir` on `tmpfs`.
 
-**Decision Rule from Experiment 3 (High confidence):**
+**Decision Rule from Experiment 3:**
 - Configuration 2 (`snap` on `tmpfs`, `wal` on real disk) gives you the **hard ceiling on throughput and latency improvement achievable by any backend storage engine replacement** (since no disk-backed LSM can do less disk I/O than `0` disk I/O on `tmpfs`, apart from eliminating `bbolt`'s in-memory B+tree rebalance CPU time).
 - If Configuration 2 improves throughput over Configuration 1 by `< 15%`, **do not replace `bbolt`**—your bottleneck is in the Raft WAL or CPU/network path.
 - If Configuration 2 improves throughput or p99 latency by `> 40%–300%`, **the backend disk I/O is confirmed as the primary bottleneck**, justifying Experiment 5.

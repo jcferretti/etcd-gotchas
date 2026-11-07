@@ -271,3 +271,14 @@ recorded here (`AGENTS.md` §9, rule 1).
   anchors, Chubby citation counts, line references from other files, and the
   denylist. On the user's instruction it also shortened the `Confidence review`
   line in `storage-codex.md` and `wal-replacement-codex.md`.
+- 2026-11-07: Second confidence pass, at the user's request: Antigravity
+  removed the High tags on settled facts from its six `-agy` files, including
+  most of those the first pass had added to headings and table rows.
+  Occurrences of "High" fell from 525 to 62 (90 before the first pass);
+  Moderate (98) and Low (15) were kept, some moved inline from removed table
+  columns, and the levels in each Summary are unchanged. Line counts are
+  unchanged; headings with a tag fell from 78 to 9. Evidence pointers that the
+  first pass had put inside tags went with them; no other citation was lost.
+  One rename: `wal-replacement-agy.md:190` "MVCC Engine" became "State
+  Machine". Claude Code checked tables, Chubby citations, Summary levels and
+  the denylist, not the ratings.
