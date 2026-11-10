@@ -1,8 +1,11 @@
 # Watchers: Raft Bypass, Leader Failover, API Promises, and Client/Server Failure States
 
-- **History:** revised 2026-11-01 for exposition clarity and cross-validated against `etcd v3.7.3` and `jetcd 0.8.7`
-- **Versions analyzed:** etcd `v3.7.3` (`0a173d0410a9`); jetcd `jetcd-0.8.7` (`23b61f1499a5`); raft `go.etcd.io/raft/v3` `v3.7.0`; selected Kubernetes `v1.37.2` storage/cacher files; selected upstream `main` commits cited explicitly where relevant
+- **History:** revised 2026-11-01 for exposition clarity and cross-validated against `etcd v3.7.3` and `jetcd 0.8.7`; updated 2026-11-09 with findings from the Jepsen [`etcd 3.4.3`](https://jepsen.io/analyses/etcd-3.4.3) and [`jetcd 0.8.2`](https://jepsen.io/analyses/jetcd-0.8.2) analyses and associated upstream fixes through `etcd v3.7.3` and `jetcd-0.8.7` / `jetcd-0.8.8`
+- **Versions analyzed:** etcd `v3.7.3` (`0a173d0410a9`); jetcd `jetcd-0.8.7` (`23b61f1499a5`, plus upstream tag `jetcd-0.8.8` = `a2909b821` / `origin/main` checked for post-`0.8.7` diffs); raft `go.etcd.io/raft/v3` `v3.7.0`; selected Kubernetes `v1.37.2` storage/cacher files; selected upstream `main` commits cited explicitly where relevant
 - **Upstream references:**
+  - **External analyses:**
+    [Jepsen etcd 3.4.3 analysis](https://jepsen.io/analyses/etcd-3.4.3) (2020-01-30),
+    [Jepsen jetcd 0.8.2 analysis](https://jepsen.io/analyses/jetcd-0.8.2) (2024-08-08)
   - **etcd issues & PRs (Watch correctness, failover, progress, proxy, and Raft/ReadIndex bypass):**
     [#5324](https://github.com/etcd-io/etcd/pull/5324),
     [#5328](https://github.com/etcd-io/etcd/pull/5328),
@@ -18,6 +21,8 @@
     [#10422](https://github.com/etcd-io/etcd/issues/10422),
     [#10681](https://github.com/etcd-io/etcd/issues/10681),
     [#10819](https://github.com/etcd-io/etcd/issues/10819),
+    [#11457](https://github.com/etcd-io/etcd/issues/11457) (PR [#11490](https://github.com/etcd-io/etcd/pull/11490) / `3898452b5`, `e0ff5ca31`),
+    [#11496](https://github.com/etcd-io/etcd/issues/11496) (PR [#11559](https://github.com/etcd-io/etcd/pull/11559) / `342c2464a`),
     [#12022](https://github.com/etcd-io/etcd/issues/12022),
     [#12254](https://github.com/etcd-io/etcd/issues/12254),
     [#12534](https://github.com/etcd-io/etcd/issues/12534),
@@ -70,12 +75,16 @@
   - **jetcd issues & PRs:**
     [#946](https://github.com/etcd-io/jetcd/issues/946),
     [#1055](https://github.com/etcd-io/jetcd/issues/1055),
+    [#1072](https://github.com/etcd-io/jetcd/issues/1072),
     [#1227](https://github.com/etcd-io/jetcd/issues/1227),
     [#1352](https://github.com/etcd-io/jetcd/issues/1352),
     [#1379](https://github.com/etcd-io/jetcd/issues/1379),
-    [#1393](https://github.com/etcd-io/jetcd/issues/1393),
+    [#1393](https://github.com/etcd-io/jetcd/pull/1393),
+    [#1444](https://github.com/etcd-io/jetcd/issues/1444) (PR [#1445](https://github.com/etcd-io/jetcd/pull/1445)),
     [#1616](https://github.com/etcd-io/jetcd/issues/1616),
-    [#1617](https://github.com/etcd-io/jetcd/pull/1617)
+    [#1617](https://github.com/etcd-io/jetcd/pull/1617) (`dc4fc009c`, in `jetcd-0.8.8`),
+    [#1631](https://github.com/etcd-io/jetcd/pull/1631) (`b4ccc3dea`, in `jetcd-0.8.8`),
+    commit `525794a7c` (in `jetcd-0.8.8`)
   - **Kubernetes issues & KEPs:**
     [kubernetes/kubernetes#59848](https://github.com/kubernetes/kubernetes/issues/59848),
     [kubernetes/kubernetes#76624](https://github.com/kubernetes/kubernetes/issues/76624),
@@ -262,6 +271,16 @@ There is a fundamental distributed-systems contradiction across these statements
    - Either polling a quorum-backed linearizable `KV.Get` (to force a Raft `ReadIndex`, compare the cluster's true revision against the watcher's local revision, and bypass or restart the watch when it lags—as Kubernetes had to engineer in `KEP-2340` `ConditionalProgressRequester` + `delegator.go:160-172`), or
    - Periodically tearing down and restarting watchers / re-listing on a fixed schedule to escape silent zombie streams (without which stale watch caches cause production split-brain bugs such as `kubernetes/kubernetes#59848` / `etcd#8673`).
 
+#### 2.2.2 Historical Context from the Jepsen `etcd 3.4.3` Analysis: Consistency Terminology and Why Jepsen's Watch Workload Did Not Hit Silent Watch Hangs
+
+In its [analysis of `etcd 3.4.3`](https://jepsen.io/analyses/etcd-3.4.3) (`2020-01-30`), Jepsen evaluated both etcd's consistency documentation and its Watch behavior under faults:
+1. **Correction of `api_guarantees.md` Consistency Definitions (§1.1, §4, [#11457](https://github.com/etcd-io/etcd/issues/11457), PR [#11490](https://github.com/etcd-io/etcd/pull/11490)):**
+   Jepsen noted that etcd's pre-2020 `Documentation/learning/api_guarantees.md` misstated distributed-systems consistency guarantees—claiming that etcd ensured *"sequential consistency, the strongest consistency guarantee available"* and defining linearizability in terms of a *"loosely synchronized global clock"*. Following [#11457](https://github.com/etcd-io/etcd/issues/11457), commits `3898452b5` and `e0ff5ca31` (PR [#11490](https://github.com/etcd-io/etcd/pull/11490)) rewrote `api_guarantees.md` to state that default KV reads, writes, and multi-key `Txn`s are **strictly serializable** (while `WithSerializable()` downgrades reads to stale committed state on the local replica) and that Watch operations are **not linearizable**.
+2. **Why Jepsen's Watch Workload Observed In-Order Delivery Without Silent Stalls (§2.5, `jepsen.etcd.watch`):**
+   Jepsen reported that apart from the `start_revision = 0` behavior (§3.2 below, [#11496](https://github.com/etcd-io/etcd/issues/11496)), *"watches appear to deliver every update to a key in order."* Inspecting Jepsen's test design ([Jepsen `etcd 3.4.3` §2.5](https://jepsen.io/analyses/etcd-3.4.3), `jepsen.etcd.watch` at `watch.clj#L131-L197`) explains why it did not hit the silent watch hangs documented above:
+   - Each Jepsen worker watched a single key **only for a few seconds at a time**, then closed the watch and opened a fresh watch starting at the last observed revision (`WithRev(lastSeenRev)`). By construction, Jepsen's harness performed **scheduled watch rotation every few seconds**, which automatically escaped any minority-partitioned or stalled node (`k8s#59848`) rather than maintaining long-lived reflector streams.
+   - Jepsen tested Go `clientv3`, which preserves explicit `ws.initReq.rev > 0` across `Created` (`client/v3/watch.go:858 @ v3.7.3`), whereas `jetcd`'s `WatchImpl.processCreated` historical cursor jump (`WatchImpl.java:267`, §5.1) was introduced 18 months later in July 2021 (`70be01a` / `jetcd#946`).
+
 ---
 
 ## 3. Leader Failover, Network Partitions, and `ReadIndex` Bypass Failures
@@ -419,15 +438,24 @@ Tracing `etcd v3.7.3` and `jetcd 0.8.7` in the exact 1-node-partitioned or 1-nod
 
 ---
 
-### 3.2 Watch Creation at Current Revision (`startRev == 0`): Non-Linearizable Binding and the `Created` Header Race
+### 3.2 Watch Creation at Current Revision (`startRev == 0`): Jepsen `etcd#11496`, Non-Linearizable Binding, and the `Created` Header Race
 
-When an application starts a watch without specifying a revision (`startRev == 0`, meaning "receive events after the current state"), two mechanisms in `etcd v3.7.3` and `clientv3 v3.7.3` break linearizability and event continuity:
+When an application starts a watch with `startRev == 0` (either omitting `WithRev` or explicitly passing `WithRev(0)`), three mechanisms across `etcd v3.7.3`, `clientv3 v3.7.3`, and `jetcd-0.8.7` create semantic surprises, break linearizability, and violate event continuity:
 
-#### 1. Local `s.store.currentRev` Binding Without `ReadIndex`
+#### 1. Jepsen `etcd 3.4.3` Finding on Watching at Revision 0 ([#11496](https://github.com/etcd-io/etcd/issues/11496), PR [#11559](https://github.com/etcd-io/etcd/pull/11559)) and Residual Spec / `jetcd` Defects
+In its [`etcd 3.4.3` report (§3.1 *"Watching With Revision 0"*)](https://jepsen.io/analyses/etcd-3.4.3), Jepsen filed [#11496](https://github.com/etcd-io/etcd/issues/11496) (*"Watches which begin at revision 0 actually start later"*):
+- **The proto3 `0` vs. `1` trap:** In etcd's MVCC store, revision `0` is the empty initial cluster state (no events ever occur at revision `0`), and the first write creates revision `1`. Because `WatchCreateRequest.start_revision` is a proto3 `int64` scalar (`api/etcdserverpb/rpc.proto:785 @ v3.7.3`), passing `start_revision: 0` on the wire is indistinguishable from leaving `start_revision` unset. Consequently, `watchableStore.watch()` (`server/storage/mvcc/watchable_store.go:142-144 @ v3.7.3`) treats `startRev == 0` as *"start at `s.store.currentRev + 1` (now)"*, whereas a caller who wants to watch all history from the beginning of the cluster must pass **`start_revision: 1`**.
+- **What PR [#11559](https://github.com/etcd-io/etcd/pull/11559) (`342c2464a`, Jan 2020) fixed vs. what remains broken at `v3.7.3` and `jetcd-0.8.7` / `0.8.8`:**
+  1. *Fixed in Go docs (`v3.7.3`):* PR [#11559](https://github.com/etcd-io/etcd/pull/11559) updated `Documentation/learning/data_model.md` and `glossary.md` to state that revisions begin at `1`, and updated the Go `Watcher.Watch` docstring (`client/v3/watch.go:51-52 @ v3.7.3`) to state: `// If the requested revision is 0 or unspecified, the returned channel will return watch events that happen after the server receives the watch request.`
+  2. *Unfixed in `rpc.proto` (`api/etcdserverpb/rpc.proto:784 @ v3.7.3`):* As noted on [#11496](https://github.com/etcd-io/etcd/issues/11496#issuecomment-579240393) after PR [#11559](https://github.com/etcd-io/etcd/pull/11559) merged, the canonical protobuf comment still only says `// start_revision is an optional revision to watch from (inclusive). No start_revision is "now".` without explaining that `0` in proto3 means "no `start_revision`" (`current_revision + 1`) and `1` is required to watch from the start of history.
+  3. *Copy-pasted `GetOption` docstring in `jetcd` (`WatchOption.java:161-170 @ jetcd-0.8.7` and `0.8.8`):* In `jetcd`, `WatchOption.Builder.withRevision(long rev)` has a copy-paste error from `GetOption`: *"If the revision is less or equal to zero, the get is over the newest key-value store."*
+  4. *Even the PR [#11559](https://github.com/etcd-io/etcd/pull/11559) promise (`"events that happen after the server receives the watch request"`) is violated in `v3.7.3`:* Both the unlocked `Created` header race (item 3 below) and `WithRequireLeader` Failure #2 (§3.1.2) cause `startRev == 0` watches to replay pre-watch events or drop post-watch events on reconnect.
+
+#### 2. Local `s.store.currentRev` Binding Without `ReadIndex`
 When `startRev == 0`, `watchableStore.watch()` binds the watcher's starting revision (`wa.minRev`) directly to the connected replica's local `s.store.currentRev + 1` without running a Raft `ReadIndex`:
 - If a client writes key $K$ at revision `100` (on the leader) and then opens a `startRev == 0` watch that lands on a lagging follower at revision `95`, `wa.minRev` is set to `96`. As the follower catches up, the watch delivers historical writes `96..100` that occurred *before* the watch was opened.
 
-#### 2. Unlocked `Created` Header Read + `clientv3` Off-by-One Resume (**Moderate confidence** on Case B race frequency)
+#### 3. Unlocked `Created` Header Read + `clientv3` Off-by-One Resume (**Moderate confidence** on Case B race frequency)
 In `serverWatchStream.recvLoop`, the server registers the watcher under `watchableStore.mu.Lock()` (line 340), releases the lock, and then reads `sws.watchStream.Rev()` **outside the lock** (line 358) to populate `Created.Header.Revision`. Meanwhile, when `clientv3` receives `Created` for a `ws.initReq.rev == 0` watch, it sets `nextRev = wr.Header.Revision` **without adding `+ 1`**—because the comment author at `client/v3/watch.go:849-857` mistakenly assumed `StartRevision: 100` watches *after* revision `100`, overlooking that `start_revision` (`rpc.proto:784`) is **inclusive**.
 
 If the stream disconnects right after `Created` (before the first event arrives), two failure cases occur depending on whether concurrent writes committed between lines 340 and 358:
@@ -833,6 +861,11 @@ When `jetcd` opens (or resumes) a watch at an explicit historical revision `star
    `WatcherImpl.resume()` never calls `.setFragment(...)` on `WatchCreateRequest.Builder`, so large multi-key transactions or catch-up batches cannot be fragmented across responses.
 4. **Go `clientv3` Unbounded Per-Substream Memory Buffer (`client/v3/watch.go:818-885 @ v3.7.3`):**
    In `clientv3`, `serveSubstream` appends incoming responses to an **unbounded** slice `ws.buf = append(ws.buf, wr)` whenever the caller has not drained the 1-slot `ws.outc` channel, allowing a single slow consumer to grow client heap memory without bound.
+5. **Post-`0.8.7` Changes in `jetcd-0.8.8` (`origin/main`) (`#1616`, `#1631`, `525794a7c`):**
+   Checking `jetcd-0.8.8` (`a2909b821`) confirms that all `WatchImpl.java` cursor and resumption defects (`:267, 293, 312, 354, 362`) remain unfixed, while three adjacent changes landed after `0.8.7`:
+   - **Channel reconnect backoff reset ([#1616](https://github.com/etcd-io/jetcd/issues/1616) / PR [#1617](https://github.com/etcd-io/jetcd/pull/1617), `dc4fc009c`):** In `jetcd-0.8.7`, while `grpc-java`'s managed channel was in exponential reconnect backoff (up to 2 minutes), retry attempts on `Status.UNAVAILABLE` failed immediately without attempting a TCP connection; `dc4fc009c` calls `connectionManager.getChannel().resetConnectBackoff()` before retrying `UNAVAILABLE`.
+   - **`Observers.Builder` callback mutability fix (PR [#1631](https://github.com/etcd-io/jetcd/pull/1631), `b4ccc3dea`):** Fixed a bug where reusing an `Observers.Builder` instance mutated already-built `StreamObserver` callbacks.
+   - **Member-switching watch header documentation (`525794a7c`):** Added tests and documentation noting that `WatchResponse` headers on a single logical `Watcher` can bear different `member_id` values after a reconnect switches to another cluster member.
 
 ---
 

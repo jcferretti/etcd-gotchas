@@ -1,12 +1,15 @@
 # etcd Leases, Raft Bypass, and Leader Failover Correctness
 
-- **History:** revised 2026-11-01 after cross-validating peer analyses `leases-claude.md` and `leases-codex.md` against `v3.7.3` and `jetcd-0.8.7` source code
+- **History:** revised 2026-11-01 after cross-validating peer analyses `leases-claude.md` and `leases-codex.md` against `v3.7.3` and `jetcd-0.8.7` source code; updated 2026-11-09 with findings from the Jepsen [`etcd 3.4.3`](https://jepsen.io/analyses/etcd-3.4.3) and [`jetcd 0.8.2`](https://jepsen.io/analyses/jetcd-0.8.2) analyses and associated upstream fixes through `etcd v3.7.3` and `jetcd-0.8.7` / `jetcd-0.8.8`
 - **Versions analyzed:**
   - etcd `v3.7.3` (`0a173d0410a9`); upstream `origin/main` (`1573d59416ef`) and `origin/release-3.7` (`34d8004033dd`) checked for post-release diffs
   - `go.etcd.io/raft/v3` `v3.7.0` (pinned in `server/go.mod:30 @ v3.7.3`)
-  - jetcd `jetcd-0.8.7` (`23b61f1499a5`)
+  - jetcd `jetcd-0.8.7` (`23b61f1499a5`); upstream tag `jetcd-0.8.8` (`a2909b821`) / `origin/main` checked for post-`0.8.7` diffs
   - Kubernetes `v1.37.2` (`c50e5395f1ae`) / `master` (`3c690c189e5d`) for `lease_manager.go`, `reconcilers/lease.go`, `coordination.k8s.io/v1`, and `kubeadm`
 - **Upstream references:**
+  - **External analyses:**
+    [Jepsen etcd 3.4.3 analysis](https://jepsen.io/analyses/etcd-3.4.3) (2020-01-30),
+    [Jepsen jetcd 0.8.2 analysis](https://jepsen.io/analyses/jetcd-0.8.2) (2024-08-08)
   - **Open `etcd-io/etcd` lease, session, and leasing issues/PRs:**
     [#22649](https://github.com/etcd-io/etcd/issues/22649) (PR [#22650](https://github.com/etcd-io/etcd/pull/22650)),
     [#22094](https://github.com/etcd-io/etcd/issues/22094) (PRs [#22253](https://github.com/etcd-io/etcd/pull/22253), [#22291](https://github.com/etcd-io/etcd/pull/22291)),
@@ -20,7 +23,10 @@
     [#22417](https://github.com/etcd-io/etcd/issues/22417),
     [#22209](https://github.com/etcd-io/etcd/issues/22209) (PR [#22550](https://github.com/etcd-io/etcd/pull/22550)),
     [#22450](https://github.com/etcd-io/etcd/issues/22450)
-  - **Closed `etcd-io/etcd` issues/PRs on Raft bypass, leader failover, and lease expiration:**
+  - **Closed `etcd-io/etcd` issues/PRs on Raft bypass, leader failover, locks, and lease expiration:**
+    [#10096](https://github.com/etcd-io/etcd/issues/10096),
+    [#11456](https://github.com/etcd-io/etcd/issues/11456) (`b14c7cd44`, PR [#11458](https://github.com/etcd-io/etcd/pull/11458) / `b41711276`),
+    [#11457](https://github.com/etcd-io/etcd/issues/11457) (PR [#11490](https://github.com/etcd-io/etcd/pull/11490) / `e0ff5ca31`),
     [#13915](https://github.com/etcd-io/etcd/issues/13915),
     [#13776](https://github.com/etcd-io/etcd/issues/13776),
     [#15247](https://github.com/etcd-io/etcd/issues/15247),
@@ -54,6 +60,15 @@
     [#19091](https://github.com/etcd-io/etcd/issues/19091),
     [#12260](https://github.com/etcd-io/etcd/issues/12260),
     [#13019](https://github.com/etcd-io/etcd/issues/13019)
+  - **`etcd-io/jetcd` issues/PRs on leases, locks, elections, and retries:**
+    [#1072](https://github.com/etcd-io/jetcd/issues/1072),
+    [#1322](https://github.com/etcd-io/jetcd/issues/1322) (`10b07f5`),
+    [#1336](https://github.com/etcd-io/jetcd/issues/1336) (PR [#1337](https://github.com/etcd-io/jetcd/pull/1337) / `2398ebd24`),
+    [#1383](https://github.com/etcd-io/jetcd/issues/1383) (`42b3f96e1`, in `jetcd-0.8.8`),
+    [#1444](https://github.com/etcd-io/jetcd/issues/1444) (PR [#1445](https://github.com/etcd-io/jetcd/pull/1445) / `05f92e044`),
+    [#1540](https://github.com/etcd-io/jetcd/issues/1540) (open),
+    [#1616](https://github.com/etcd-io/jetcd/issues/1616) (PR [#1617](https://github.com/etcd-io/jetcd/pull/1617) / `dc4fc009c`, in `jetcd-0.8.8`),
+    [#1626](https://github.com/etcd-io/jetcd/issues/1626) (open)
   - **Kubernetes issues/PRs:**
     [kubernetes#65497](https://github.com/kubernetes/kubernetes/issues/65497),
     [kubernetes#47532](https://github.com/kubernetes/kubernetes/issues/47532),
@@ -87,8 +102,8 @@ This document evaluates the correctness, failover safety, and production readine
    - **R4 (`Revoke` / `Renew` lock-drop TOCTOU race):** `lessor.Revoke` unlocks `le.mu` while deleting attached keys, allowing a concurrent `lessor.Renew` to see the lease still in `leaseMap` and return full-TTL success while its keys are being deleted ([#14758](https://github.com/etcd-io/etcd/issues/14758), unmerged PR [#21389](https://github.com/etcd-io/etcd/pull/21389)).
 4. **TTL preservation (`LeaseCheckpoint`) remains Alpha, disabled by default, coarse-grained (5 min), and broken on checkpoint-clear error ([#22649](https://github.com/etcd-io/etcd/issues/22649)) (**High confidence**):**
    By default, every leader election resets all lease TTLs to `ElectionTimeout + GrantedTTL`. Even when the Alpha `LeaseCheckpoint` gate is enabled, leases with `TTL <= 300s` are never checkpointed, leader elections faster than 5 minutes still postpone expiry indefinitely, and open bug [#22649](https://github.com/etcd-io/etcd/issues/22649) causes `SetCheckpointer` to silently discard `raftRequest` errors when `Renew()` clears a checkpointed `remainingTTL`—reporting full-TTL success to the client while arming the stale, shorter `remainingTTL` on the server.
-5. **Both Go (`client/v3`) and Java (`jetcd-0.8.7`) clients use optimistic deadlines (`receipt_time + TTL`), lack Chubby's jeopardy protocol, and contain severe leader-loss bugs (**High confidence**):**
-   In `client/v3`, open bug [#22094](https://github.com/etcd-io/etcd/issues/22094) causes `closeRequireLeader()` to close a `WithRequireLeader` subscriber's channel upon leader loss while leaving an orphaned entry in `l.keepAlives` whose deadline is refreshed on reconnect—**silently renewing the "lost" lease every 500ms for the life of the process** and wedging any held locks. Open bug [#22081](https://github.com/etcd-io/etcd/issues/22081) corrupts the subscriber context-to-channel mapping, and `grpcproxy` reads outgoing instead of incoming metadata, ignoring `WithRequireLeader`. In `jetcd-0.8.7`, `KeepAlive.handleException` delivers a terminal `onError` to all `StreamObserver`s on any stream error without removing the lease, then reconnects 500ms later and **renews the lease in the background forever** unless `CloseableClient.close()` is called.
+5. **Both Go (`client/v3`) and Java (`jetcd-0.8.7`) clients use optimistic deadlines (`receipt_time + TTL`), lack Chubby's jeopardy protocol, and contain severe leader-loss, stream-close, and lock/election bugs (**High confidence**):**
+   In `client/v3`, open bug [#22094](https://github.com/etcd-io/etcd/issues/22094) causes `closeRequireLeader()` to close a `WithRequireLeader` subscriber's channel upon leader loss while leaving an orphaned entry in `l.keepAlives` whose deadline is refreshed on reconnect—**silently renewing the "lost" lease every 500ms for the life of the process** and wedging any held locks. Open bug [#22081](https://github.com/etcd-io/etcd/issues/22081) corrupts the subscriber context-to-channel mapping, `grpcproxy` reads outgoing instead of incoming metadata (ignoring `WithRequireLeader`), and `Election.Campaign` (`client/v3/concurrency/election.go:93-106 @ v3.7.3`) never received the post-`waitDeletes` ownership check added to `Mutex.Lock` after Jepsen's `etcd 3.4.3` report ([#11456](https://github.com/etcd-io/etcd/issues/11456)). In `jetcd-0.8.7`, `KeepAlive.handleException` delivers a terminal `onError` to all `StreamObserver`s on any stream error without removing the lease, then reconnects 500ms later and **renews the lease in the background forever** unless `CloseableClient.close()` is called; a clean server stream close (`onCompleted`) permanently halts renewals without notifying observers (fixed post-`0.8.7` in `jetcd-0.8.8` via [#1383](https://github.com/etcd-io/jetcd/issues/1383) / `42b3f96e1`); and `LeaseImpl.grant`/`revoke` and `LockImpl.unlock` retain `UNAVAILABLE` auto-retry (`Errors::isRetryableForSafeRedoOp` after PR [#1445](https://github.com/etcd-io/jetcd/pull/1445)).
 6. **Kubernetes uses API-object coordination (`coordination.k8s.io/v1` `Lease`) rather than native etcd leases, while `Event` TTL leases suffer from failover retention and multi-key revocation watch bugs (**High confidence**):**
    Because Kubernetes components interact only through `kube-apiserver`, leader election and node heartbeats use `coordination.k8s.io/v1` `Lease` API objects (plain MVCC keys with client-evaluated `spec.renewTime` and CAS `resourceVersion`, with no etcd `TTLFunc`), and `kube-apiserver` never calls `KeepAlive`. For `Event` TTLs, `kube-apiserver` had to pool Events into shared 60s leases capped at 1,000 objects ([#47532](https://github.com/kubernetes/kubernetes/issues/47532), [#96836](https://github.com/kubernetes/kubernetes/issues/96836)), remains exposed to indefinite Event growth under frequent elections on default `kubeadm` clusters ([#65497](https://github.com/kubernetes/kubernetes/issues/65497)), and has an open watch bug ([#110210](https://github.com/kubernetes/kubernetes/issues/110210)) because `lessor.Revoke` deletes all keys on a shared lease at a single MVCC main revision.
 
@@ -139,7 +154,7 @@ flowchart TD
 | **P2** | **Expiration Upper Bound (Liveness / GC):** An unrenewed lease is revoked roughly `TTL` seconds after grant or last renewal. | **Violated by design on failover and restart.** | Every leader election or restart resets uncheckpointed leases to `now + ElectionTimeout + GrantedTTL` (`lessor.go:480-492`) and spreads expiries when $\ge 1000$ leases exist (`lessor.go:494-531`). Even with `LeaseCheckpoint` enabled, leases with `TTL <= 300s` are never checkpointed, and leader elections faster than 5 minutes postpone expiration indefinitely (§3.3). |
 | **P3** | **Expiration Lower Bound (Renewal Safety Promise):** Once the server acknowledges a `Grant` or `KeepAlive` with `TTL`, it does not automatically revoke the lease before `TTL` elapses while a quorum survives. | **Broken historically ([#12528](https://github.com/etcd-io/etcd/issues/12528), [#15247](https://github.com/etcd-io/etcd/issues/15247)); broken when `LeaseCheckpoint` is on ([#22649](https://github.com/etcd-io/etcd/issues/22649)); residual races remain (§3.2, **Moderate confidence**).** | Raft replicates any `LeaseRevoke` proposal without validating whether the proposer's timer decision is stale. Pre-proposal `ensureLeadership()` checks mitigate [#15247](https://github.com/etcd-io/etcd/issues/15247) but leave post-check batching and checkpoint-clear holes (§3.2, §3.3). |
 | **P4** | **Lease API Linearizability:** `LeaseTimeToLive`, `LeaseLeases`, and `LeaseKeepAliveResponse.Header.Revision` reflect linearizable state. | **Not provided** ([#13915](https://github.com/etcd-io/etcd/issues/13915), closed *not planned*). | `LeaseLeases` is a local unlinearized read (`v3_server.go:737-749`); follower-forwarded `KeepAlive` and `TimeToLive` stamp responses with the follower's local `Revision` (`v3rpc/lease.go:74,134`); `FastLeaseKeepAlive` skips `waitAppliedIndex()` (`v3_server.go:512-523`; §3.4). |
-| **P5** | **Mutual Exclusion for Locks / Elections:** Only one client acts as lock holder or leader at a time. | **Requires transactional revision fencing in any lease design.** | Client deadlines are local (and optimistic in etcd/jetcd, §4.1), so safe etcd writes must compare `CreateRevision(myKey) == myRev` inside a Raft `Txn` (`Mutex.IsOwner()` in `client/v3/concurrency/mutex.go:152-153`; `Election.Proclaim()` in `election.go:115`). Fencing protects etcd writes even when P3 fails, but external side effects (and unfenced deletes like `Mutex.Unlock` in [#22082](https://github.com/etcd-io/etcd/issues/22082)) suffer server-induced dual leadership if P3 fails. |
+| **P5** | **Mutual Exclusion for Locks / Elections:** Only one client acts as lock holder or leader at a time. | **Requires transactional revision fencing in any lease design; `Election.Campaign` and `Unlock` remain flawed in `v3.7.3`.** | As demonstrated in the [Jepsen `etcd 3.4.3` analysis (§3.2 *"Locks Aren't Real"*)](https://jepsen.io/analyses/etcd-3.4.3) ([#11456](https://github.com/etcd-io/etcd/issues/11456), [#11457](https://github.com/etcd-io/etcd/issues/11457), PR [#11490](https://github.com/etcd-io/etcd/pull/11490)), client deadlines are local and optimistic (§4.1), so 1–3s lease TTLs violated lock mutual exclusion within minutes even on healthy clusters unless every mutation is guarded inside a Raft `Txn` by `CreateRevision(myKey) == myRev` (`Mutex.IsOwner()` in `client/v3/concurrency/mutex.go:152-153`; `Election.Proclaim()` in `election.go:115`). Furthermore, while `Mutex.Lock` added a post-`waitDeletes` ownership check (`b14c7cd44`, `mutex.go:97-106`), `Election.Campaign` (`election.go:93-106 @ v3.7.3`) never received that check, and `Mutex.Unlock` / `v3lock.Unlock` ([#22082](https://github.com/etcd-io/etcd/issues/22082)) execute unfenced deletes (§4.5). |
 
 ---
 
@@ -432,7 +447,7 @@ As a result, `lostLeaderC` is always `nil`, and `closeRequireLeader()` on the pr
 
 ---
 
-### 4.4 Java Client (`jetcd-0.8.7`) Defects (`LeaseImpl.java` and `jetcd-launcher`)
+### 4.4 Java Client (`jetcd-0.8.7` and `jetcd-0.8.8`) Defects (`LeaseImpl.java`, `LockImpl.java`, `ElectionImpl.java`, and `jetcd-launcher`)
 
 1. **Terminal `onError` Followed by Infinite Background Renewal and Post-Error `onNext` Events:**
    `LeaseImpl` unconditionally applies `Util.applyRequireLeader(true, ...)` to `leaseStub`. When the keepalive stream encounters any error (including `ErrGRPCNoLeader` on leader loss or a transient disconnect), `KeepAlive.handleException` delivers `onError` to all registered `StreamObserver`s without removing the lease, and restarts the stream 500ms later:
@@ -453,8 +468,20 @@ As a result, `lostLeaderC` is always `nil`, and `closeRequireLeader()` on the pr
    - **Non-terminal `onError` violates `StreamObserver` conventions (and its unit test class is `@Disabled`):** Because `handleException` and `KeepAliveObserver.onError` neither clear `ka.observers` nor remove the lease from `keepAlives`, reconnecting 500ms later delivers subsequent `onNext` / `onError` / `onCompleted` calls to `StreamObserver` instances that already received `onError`. *(This behavior was added in `jetcd` #1322 / commit `10b07f5` and encoded in `LeaseUnitTest.testKeepAliveResetOnStreamErrors` at `LeaseUnitTest.java:234-250 @ jetcd-0.8.7`, but the entire `LeaseUnitTest` class is annotated `@Disabled("TODO: does not seems to add much value")` at `LeaseUnitTest.java:57`.)*
    - **Infinite background renewal leak (equivalent to Go's [#22094](https://github.com/etcd-io/etcd/issues/22094)):** If an application follows standard gRPC `StreamObserver` conventions by treating `observer.onError(...)` as terminal session loss and does not explicitly call `CloseableClient.close()`, `jetcd` continues renewing the lease in the background every `TTL / 3` (refreshing `ka.setDeadLine(...)` on every reply) for the lifetime of the `LeaseImpl` client, preventing attached locks or keys from ever expiring.
 
-2. **`keepAliveOnce` Duplicate Request Write (and Suppressed NPE on Pre-Open Failure):**
-   In `LeaseImpl.keepAliveOnce(long leaseId)`:
+2. **Missing `endHandler` on Clean Server Stream Close in `jetcd-0.8.7` (Fixed Post-`0.8.7` in `jetcd-0.8.8` via [#1383](https://github.com/etcd-io/jetcd/issues/1383) / `42b3f96e1`):**
+   In `jetcd-0.8.7`, `LeaseImpl.KeepAlive.start()` (`LeaseImpl.java:201-208`) and `keepAliveOnce` (`LeaseImpl.java:168`) pass `null` as the stream `endHandler` (`onCompleted`):
+   ```java
+   // jetcd-core/.../impl/LeaseImpl.java:201-208 @ jetcd-0.8.7
+   leaseStub.leaseKeepAliveWithHandler(
+       this::handleWriteStream,
+       this::handleResponse,
+       null, // BUG (#1383): clean stream close (HTTP/2 EOF / Status.OK) is ignored!
+       this::handleException);
+   ```
+   When an etcd server or proxy closes the `LeaseKeepAlive` stream cleanly with `Status.OK` (for example during a graceful node shutdown or proxy drain), `handleException` never runs: `KeepAlive` never restarts the stream, all active leases silently expire after their local `DeadLine` without ever calling `onError` until `DeadLine` fires `onCompleted`, and any in-flight `keepAliveOnce` `CompletableFuture` hangs forever. Commit `42b3f96e1` (`Fixes #1383`, in `jetcd-0.8.8` / `origin/main`) fixed `KeepAlive` by passing `this::handleEnd` (which schedules `restart()` after 500ms) and fixed `keepAliveOnce` by completing the future exceptionally with `UNAVAILABLE` if the stream ends before a response arrives.
+
+3. **`keepAliveOnce` Duplicate Request Write, Suppressed NPE on Pre-Open Failure, and Missing Retry Logic (Open [#1540](https://github.com/etcd-io/jetcd/issues/1540), [#1626](https://github.com/etcd-io/jetcd/issues/1626)):**
+   In `LeaseImpl.keepAliveOnce(long leaseId)` (`LeaseImpl.java:149-172 @ jetcd-0.8.7`):
    ```java
    // jetcd-core/.../impl/LeaseImpl.java:154-171 @ jetcd-0.8.7
    leaseStub.leaseKeepAliveWithHandler(
@@ -462,12 +489,56 @@ As a result, `lostLeaderC` is always `nil`, and `closeRequireLeader()` on the pr
        r -> { ... }, null, future::completeExceptionally);
    return future.whenComplete((r, t) -> ref.get().end(req));
    ```
-   On normal completion, `ref.get().end(req)` invokes Vert.x `WriteStream.end(T)`, which writes a second, redundant `LeaseKeepAliveRequest` before half-closing the stream. *(If stream creation fails before `s -> ref.set(s)` runs, `ref.get()` is `null` and `ref.get().end(req)` throws a `NullPointerException`, which `CompletableFuture.whenComplete` catches and attaches as a suppressed exception to the already-failed future.)*
+   - On normal completion, `ref.get().end(req)` invokes Vert.x `WriteStream.end(T)`, which writes a second, redundant `LeaseKeepAliveRequest` before half-closing the stream. *(If stream creation fails before `s -> ref.set(s)` runs, `ref.get()` is `null` and `ref.get().end(req)` throws a `NullPointerException`, which `CompletableFuture.whenComplete` catches and attaches as a suppressed exception to the already-failed future.)*
+   - Unlike unary RPCs in `LeaseImpl`, `keepAliveOnce` bypasses `execute()` completely and has **no retry logic** on transient `Status.UNAVAILABLE` or expired auth tokens (open [#1540](https://github.com/etcd-io/jetcd/issues/1540); see also open [#1626](https://github.com/etcd-io/jetcd/issues/1626) on supporting reusable application-driven keepalive streams).
 
-3. **Outdated Test Container Target in `jetcd-launcher`:**
+4. **Interaction Between the Post-Jepsen `jetcd 0.8.2` Retry Fix ([#1444](https://github.com/etcd-io/jetcd/issues/1444) / PR [#1445](https://github.com/etcd-io/jetcd/pull/1445)) and `LeaseImpl`, `LockImpl`, and `ElectionImpl`:**
+   Following the [Jepsen `jetcd 0.8.2` analysis](https://jepsen.io/analyses/jetcd-0.8.2) (which proved that `jetcd` `0.6.0–0.8.2` automatically retried non-idempotent operations on `Status.UNAVAILABLE`, causing lost updates, circular information flow, and false-negative aborted reads; see [`etcd-issues-and-mitigations-agy.md` §1.2](etcd-issues-and-mitigations-agy.md)), commit `05f92e044` (PR [#1445](https://github.com/etcd-io/jetcd/pull/1445), in `jetcd 0.8.5+` and `jetcd-0.8.7`) split `Errors.isRetryable` (`Errors.java:29-41 @ jetcd-0.8.7`) into `isRetryableForSafeRedoOp` (retries `UNAVAILABLE` and auth token refreshes) and `isRetryableForNoSafeRedoOp` (retries **only** auth token refreshes). Auditing `LeaseImpl`, `LockImpl`, and `ElectionImpl` at `jetcd-0.8.7` shows:
+   - **`ElectionImpl` (`ElectionImpl.java:55-146 @ jetcd-0.8.7`):** Previously (`< 0.8.0`), `ElectionImpl` did not use `execute()` (so auth token expiry after 5 minutes killed blocked `campaign` calls) and did not set `WithRequireLeader` (so a partitioned follower blocked `campaign` forever); both were fixed in [#1336](https://github.com/etcd-io/jetcd/issues/1336) / PR [#1337](https://github.com/etcd-io/jetcd/pull/1337) (`2398ebd24`). In PR [#1445](https://github.com/etcd-io/jetcd/pull/1445) (`05f92e044`), all `ElectionImpl` methods (`campaign`, `proclaim`, `leader`, `resign`) were updated to use `Errors::isRetryableForNoSafeRedoOp`.
+   - **`LockImpl.unlock` (`LockImpl.java:74-85 @ jetcd-0.8.7`):** While PR [#1337](https://github.com/etcd-io/jetcd/pull/1337) added `stubWithLeader()`, PR [#1445](https://github.com/etcd-io/jetcd/pull/1445) kept `Errors::isRetryableForSafeRedoOp` (`UNAVAILABLE` auto-retry) on both `LockImpl.lock` and `LockImpl.unlock`. Because server-side `lockServer.Unlock` (`server/etcdserver/api/v3lock/lock.go:52-58 @ v3.7.3`) executes an unfenced `Delete(ctx, string(req.Key))` where the key is `<pfx>/<leaseId>` ([#22082](https://github.com/etcd-io/etcd/issues/22082)), if a first `unlock` commits on the server, the connection drops before the reply arrives (`UNAVAILABLE`), and another task on the same client re-acquires the lock under the same shared session `leaseId`, `jetcd`'s automatic retry of `unlock` deletes the newly acquired lock key.
+   - **`LeaseImpl.grant` and `LeaseImpl.revoke` (`LeaseImpl.java:81-111 @ jetcd-0.8.7`):** Both call `execute(..., true)` (`Errors::isRetryableForSafeRedoOp`). If the first `grant(ttl)` commits on the server and the connection drops with `UNAVAILABLE`, the automatic retry grants a second lease while leaking the first lease on the server until its TTL expires. If the first `revoke(leaseId)` commits on the server (deleting the lease and its attached keys) and the connection drops with `UNAVAILABLE`, the automatic retry fails with `NOT_FOUND` (`etcdserver: requested lease not found`), converting a committed revocation into a false-negative exception (the same indefinite-to-definite failure pattern documented in Jepsen `jetcd 0.8.2` §3.3).
+
+5. **Outdated Test Container Target in `jetcd-launcher`:**
    `jetcd-launcher` defaults to `quay.io/coreos/etcd:v3.5.14`, two minor versions behind `v3.7.3` (predating PR #18439's `isActive()` shortcut in v3.5.16, PR #20590's renew re-check in v3.5.23, and `FastLeaseKeepAlive`).
 
-> **Evidence:** `jetcd-core/src/main/java/io/etcd/jetcd/impl/LeaseImpl.java:74,149-172,234-246,263-287,301-314,391-396 @ jetcd-0.8.7`; `jetcd-core/src/test/java/io/etcd/jetcd/impl/LeaseUnitTest.java:57,234-250 @ jetcd-0.8.7`; `jetcd-common/src/main/java/io/etcd/jetcd/common/Service.java:40-43 @ jetcd-0.8.7`; `jetcd-launcher/src/main/java/io/etcd/jetcd/launcher/Etcd.java:31 @ jetcd-0.8.7`.
+> **Evidence:** `jetcd-core/src/main/java/io/etcd/jetcd/impl/LeaseImpl.java:74,81-111,149-172,201-208,234-246,263-287,301-314,391-396 @ jetcd-0.8.7` (and `42b3f96e1 @ jetcd-0.8.8`); `jetcd-core/src/main/java/io/etcd/jetcd/impl/LockImpl.java:37-85 @ jetcd-0.8.7`; `jetcd-core/src/main/java/io/etcd/jetcd/impl/ElectionImpl.java:55-146 @ jetcd-0.8.7`; `jetcd-core/src/main/java/io/etcd/jetcd/support/Errors.java:29-41 @ jetcd-0.8.7`; `jetcd-core/src/test/java/io/etcd/jetcd/impl/LeaseUnitTest.java:57,234-250 @ jetcd-0.8.7`; `jetcd-common/src/main/java/io/etcd/jetcd/common/Service.java:40-43 @ jetcd-0.8.7`; `jetcd-launcher/src/main/java/io/etcd/jetcd/launcher/Etcd.java:31 @ jetcd-0.8.7`.
+
+---
+
+### 4.5 Concurrency Locks & Elections (`client/v3/concurrency`, `v3lock`, `v3election`): Jepsen `etcd 3.4.3` Findings and Unfixed Gaps in `v3.7.3`
+
+In its [analysis of `etcd 3.4.3` (§3.2 *"Locks Aren't Real"*)](https://jepsen.io/analyses/etcd-3.4.3), Jepsen tested `etcd`'s lock service (`v3lock` / `client/v3/concurrency.Mutex`) and reported three critical findings that remain essential for evaluating `etcd v3.7.3`:
+
+1. **Empirical Demonstration That Lease-Backed Locks Require Fencing Tokens ([#11457](https://github.com/etcd-io/etcd/issues/11457), PR [#11490](https://github.com/etcd-io/etcd/pull/11490)):**
+   - Because lease expiration is time-based and client deadlines are optimistic (§4.1), any process pause, GC stall, or network delay allows a lease to expire on the server while the lock holder still believes it holds the lock. In Jepsen's tests (`etcd 3.4.3` §3.2.1–§3.2.3), locks backed by 1–3s lease TTLs violated mutual exclusion within minutes **even in healthy clusters with no injected faults**, and a 2s lease TTL combined with 5s `SIGSTOP` process pauses caused ~18% of lock-guarded set updates to be lost.
+   - Following [#11457](https://github.com/etcd-io/etcd/issues/11457), PR [#11490](https://github.com/etcd-io/etcd/pull/11490) (`e0ff5ca31`, updating `Documentation/learning/lock/README.md` and `why.md`) documented that etcd locks cannot be used safely as standalone mutual-exclusion primitives: every mutation guarded by a lock or election must validate a monotonic fencing token (`Mutex.IsOwner()`, which checks `CreateRevision(m.myKey) == m.myRev` inside a Raft `Txn`, or a transactional version/revision check as verified in Jepsen's guarded lock test).
+2. **Bug [#11456](https://github.com/etcd-io/etcd/issues/11456) (*"Locks return after blocking without checking ownership"*) — Fixed in `Mutex.Lock`, Still Incomplete Under [#19597](https://github.com/etcd-io/etcd/issues/19597):**
+   - When `Mutex.Lock(ctx)` (and server-side `v3lock.Lock`, which wraps `concurrency.NewMutex`) contends for an already-held lock, it creates its own lease-attached key `m.myKey` at revision `m.myRev` and calls `waitDeletes(ctx, client, m.pfx, m.myRev-1)` (`client/v3/concurrency/key.go:49-63 @ v3.7.3`) to watch for the deletion of all predecessor keys with `CreateRevision <= m.myRev - 1`.
+   - In `etcd 3.4.3`, Jepsen discovered ([#11456](https://github.com/etcd-io/etcd/issues/11456)) that if the waiting client's own lease expired while blocked inside `waitDeletes` (deleting `m.myKey`) and the prior lock holder subsequently unlocked, `waitDeletes` returned `nil` and `Mutex.Lock` returned success—handing the caller a lock whose key had already been deleted in etcd.
+   - Commits `b14c7cd44` (Dec 2019) and `b41711276` (PR [#11458](https://github.com/etcd-io/etcd/pull/11458), Apr 2020) fixed this in `Mutex.Lock` by adding a post-wait `client.Get(ctx, m.myKey)` check (`client/v3/concurrency/mutex.go:97-106 @ v3.7.3`) that returns `ErrSessionExpired` if `len(gresp.Kvs) == 0`.
+   - **Residual Gap 1 in `Mutex.Lock` (Open [#19597](https://github.com/etcd-io/etcd/issues/19597)):** Commit `b14c7cd44` left a comment at `client/v3/concurrency/mutex.go:88 @ v3.7.3`: `// TODO: early termination if the session key is deleted before other session keys with smaller revisions.` Because `waitDeletes` only watches `maxCreateRev = m.myRev - 1` and does not select on `s.Done()` (and `server/etcdserver/api/v3lock/lock.go:44 @ v3.7.3` calls `s.Orphan()`, disabling client-side keepalives inside `v3lock`), a waiter whose lease expires while waiting remains blocked until all prior holders unlock before the post-wait `client.Get(ctx, m.myKey)` executes.
+3. **Residual Gap 2 — `Election.Campaign` Never Received the [#11456](https://github.com/etcd-io/etcd/issues/11456) Post-Wait Ownership Check (`client/v3/concurrency/election.go:93-106 @ v3.7.3`):**
+   - `Election.Campaign(ctx, val)` (which also powers the server-side `v3election.Campaign` gRPC RPC at `server/etcdserver/api/v3election/election.go:40-62 @ v3.7.3`, where `s.Orphan()` is likewise called at line 49) uses the exact same `waitDeletes` helper as `Mutex.Lock`, **but was never patched when [#11456](https://github.com/etcd-io/etcd/issues/11456) was fixed**:
+   ```go
+   // client/v3/concurrency/election.go:93-106 @ v3.7.3
+   err = waitDeletes(ctx, client, e.keyPrefix, e.leaderRev-1)
+   if err != nil {
+       // clean up in case of context cancel
+       select {
+       case <-ctx.Done():
+           e.Resign(client.Ctx())
+       default:
+           e.leaderSession = nil
+       }
+       return err
+   }
+   e.hdr = resp.Header // stale header from initial PutTxn before waiting; no Get(e.leaderKey) check!
+
+   return nil
+   ```
+   - If a candidate's lease expires while blocked in `waitDeletes` (for example, while `v3election.Campaign` waits with an orphaned session and the caller's keepalive stream lags or drops) and the incumbent leader later resigns, `waitDeletes` returns `nil` and `Campaign()` returns `nil`—reporting that the candidate is now the leader even though `e.leaderKey` was already deleted by lease expiration, and setting `e.hdr` to the stale revision from before `waitDeletes` blocked.
+
+> **Evidence:** `client/v3/concurrency/mutex.go:88-106,152-153 @ v3.7.3`; `client/v3/concurrency/election.go:63-119 @ v3.7.3`; `client/v3/concurrency/key.go:49-63 @ v3.7.3`; `server/etcdserver/api/v3lock/lock.go:35-58 @ v3.7.3`; `server/etcdserver/api/v3election/election.go:40-62 @ v3.7.3`; `Documentation/learning/lock/README.md @ v3.7.3`; [Jepsen `etcd 3.4.3` §3.2](https://jepsen.io/analyses/etcd-3.4.3).
 
 ---
 
@@ -529,18 +600,20 @@ Of 27 open issues matching `repo:etcd-io/etcd is:issue is:open lease`, 11 are di
 | `lessor.Revoke` unlocks `le.mu` while deleting attached keys (`lessor.go:337-353`), allowing a concurrent `lessor.Renew` to see `le.leaseMap[id] != nil` and return full-TTL success while keys are being deleted ([#14758](https://github.com/etcd-io/etcd/issues/14758), unmerged PR [#21389](https://github.com/etcd-io/etcd/pull/21389)). | **Verified (`lessor.go:326-365,442-455`, `kvstore_txn.go:334-345 @ v3.7.3`).** | Only triggers when `Renew` interleaves with `Revoke`'s key-deletion loop. |
 | `SetCheckpointer` discards `srv.raftRequest`'s error ([#22649](https://github.com/etcd-io/etcd/issues/22649)), causing `Renew()` to return `l.ttl` while arming the stale, shorter `l.remainingTTL`; later apply via `Checkpoint()` does not update `l.expiry`. | **Verified (`server.go:394-403`, `lessor.go:371-379,412-455`, `lease.go:76-89 @ v3.7.3`).** | Only triggers when `LeaseCheckpoint=true` (`Default: false`), `l.remainingTTL > 0`, and `srv.raftRequest` fails or times out during `Renew()`. |
 | In `client/v3`, `closeRequireLeader()` bugs [#22081](https://github.com/etcd-io/etcd/issues/22081) and [#22094](https://github.com/etcd-io/etcd/issues/22094) corrupt subscriber contexts or leak an orphaned `keepAlive` entry that renews a "lost" lease every 500ms forever; `grpcproxy` (`lease.go:161`) ignores `WithRequireLeader`. | **Verified (`client/v3/lease.go:360-411,541-619`, `grpcproxy/lease.go:160-174,276-280 @ v3.7.3`).** | [#22081](https://github.com/etcd-io/etcd/issues/22081)/[#22094](https://github.com/etcd-io/etcd/issues/22094) only trigger when callers pass `WithRequireLeader(ctx)` to `KeepAlive(ctx, id)` (`concurrency.NewSession` does not by default). |
-| In `jetcd-0.8.7`, `LeaseImpl.KeepAlive.handleException` delivers `onError` to all `StreamObserver`s on any stream error without removing the lease, then reconnects 500ms later and renews the lease in the background forever unless `CloseableClient.close()` is called. | **Verified (`LeaseImpl.java:74,263-287,391-396`, `Service.java:40-43 @ jetcd-0.8.7`).** | Does not leak background renewals if the application explicitly calls `closeableClient.close()` or `leaseClient.close()` inside its `onError` handler. |
+| In `jetcd-0.8.7`, `LeaseImpl.KeepAlive.handleException` delivers `onError` to all `StreamObserver`s on any stream error without removing the lease, then reconnects 500ms later and renews the lease in the background forever unless `CloseableClient.close()` is called; a clean server stream close (`onCompleted`) permanently stops renewals without notifying observers (`#1383`, fixed in `jetcd-0.8.8` / `42b3f96e1`); and `LeaseImpl.grant`/`revoke` and `LockImpl.unlock` retain `UNAVAILABLE` auto-retry (`Errors::isRetryableForSafeRedoOp` after PR `#1445`). | **Verified (`LeaseImpl.java:74,81-111,168,201-208,263-287,391-396`, `LockImpl.java:74-85`, `Service.java:40-43 @ jetcd-0.8.7`; `42b3f96e1 @ jetcd-0.8.8`).** | Background renewal leak is avoided if the application explicitly calls `closeableClient.close()` or `leaseClient.close()` inside its `onError` handler; `#1383` is fixed if upgrading to `jetcd-0.8.8`. |
+| Following Jepsen `etcd 3.4.3` ([#11456](https://github.com/etcd-io/etcd/issues/11456)), `Mutex.Lock` added a post-`waitDeletes` `client.Get(ctx, m.myKey)` check (`mutex.go:97-106 @ v3.7.3`), but `Election.Campaign` (`election.go:93-106 @ v3.7.3`) never received that check and returns `nil` if the candidate's lease expired while waiting. | **Verified (`client/v3/concurrency/mutex.go:88-106`, `election.go:93-106 @ v3.7.3`; commits `b14c7cd44`, `b41711276`).** | Only triggers when a campaigning candidate blocks behind an existing leader, its lease expires during `waitDeletes`, and the prior leader subsequently resigns. |
 
 ---
 
 ## Conclusions
 
-1. **Production-Readiness Verdict on etcd Leases (`v3.7.3`) and `jetcd` (`0.8.7`):**
+1. **Production-Readiness Verdict on etcd Leases (`v3.7.3`) and `jetcd` (`0.8.7` / `0.8.8`):**
    - **What is safe:** Replicated key-value consistency (P1) is solid, and applications that guard etcd writes with transactional revision compares (`CreateRevision(key) == myRev` via `Mutex.IsOwner()` or `Election.Proclaim()`, P5) cannot corrupt etcd state even when a lease fails prematurely or expires late.
    - **What is not production-ready:**
      - **Do not enable `--feature-gates=LeaseCheckpoint=true` on `v3.7.3`** without patching [#22649](https://github.com/etcd-io/etcd/issues/22649) (`server/etcdserver/server.go:401-402`): a transient Raft timeout during checkpoint-clear causes `LeaseKeepAlive` to lie to the client about its renewed TTL while keeping a shorter server timer.
      - **Do not pass `WithRequireLeader(ctx)` to `clientv3.Lease.KeepAlive(ctx, id)` on `v3.7.3`** without patching [#22081](https://github.com/etcd-io/etcd/issues/22081) and [#22094](https://github.com/etcd-io/etcd/issues/22094) (`client/v3/lease.go:376-411`): a single leader loss will close the subscriber channel while leaking a background loop that renews the lease every 500ms forever.
-     - **In `jetcd-0.8.7`, callers of `Lease.keepAlive(leaseId, observer)` must always invoke `CloseableClient.close()` inside `observer.onError()`**, or `jetcd` will silently reconnect 500ms later and renew the lease forever in the background while emitting illegal post-`onError` events.
+     - **In `jetcd`, upgrade to at least `jetcd-0.8.8` (for [#1383](https://github.com/etcd-io/jetcd/issues/1383) and [#1616](https://github.com/etcd-io/jetcd/issues/1616)), and callers of `Lease.keepAlive(leaseId, observer)` must always invoke `CloseableClient.close()` inside `observer.onError()`**, or `jetcd` will silently reconnect 500ms later and renew the lease forever in the background while emitting illegal post-`onError` events.
+     - **In `client/v3/concurrency`, verify `Election` ownership via `Proclaim` or `Get(e.Key())` after `Campaign(ctx, val)` returns**, because `Election.Campaign` (`election.go:93-106 @ v3.7.3`) lacks the [#11456](https://github.com/etcd-io/etcd/issues/11456) post-`waitDeletes` key existence check.
      - **Do not rely on native etcd leases for bounded-time TTL garbage collection under leader churn** (P2), or on `Session.Done()` alone to guard unfenced external resources (P3/P5). Kubernetes's decision to use plain MVCC keys with compare-and-swap (`coordination.k8s.io/v1` `Lease`) for leader election and node heartbeats is the sound architectural choice when deterministic failover behavior is required (**Moderate confidence** on the comparative architectural recommendation).
 
 2. **Verdict on the Design Hypothesis (**Moderate confidence** on design judgment):**

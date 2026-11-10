@@ -10,6 +10,7 @@
 | Kubernetes | `v1.37.2`, selected files fetched read-only from GitHub | `storage/etcd3/{watcher.go,store.go,event.go}`; `storage/cacher/{cacher.go,watch_cache.go,delegator.go,progress/watch_progress.go}`; `storage/storagebackend/factory/etcd3.go`; `features/kube_features.go` (all under `staging/src/k8s.io/apiserver/pkg/`). `etcd3/watcher.go` was re-fetched raw on 2026-11-01. |
 | etcd user docs | `etcd-io/website` `main`, fetched 2026-10-31 | `content/en/docs/v3.7/learning/api_guarantees.md` and `content/en/docs/v3.7/learning/design-client.md`. |
 | KEP-2340 | `kubernetes/enhancements` `master`, fetched 2026-10-31 | "Consistent reads from cache". |
+| Jepsen | [etcd 3.4.3 report](https://jepsen.io/analyses/etcd-3.4.3) (2020-01-30); test source `jepsen-io/etcd` @ `16149cb` (`src/jepsen/etcd/{watch,client}.clj`, `project.clj`); fetched 2026-11-09 | §2.5. The test used etcd 3.4.3 and jetcd 0.4.1. |
 | grpc-java | `grpc-core` 1.76.2 (local Gradle cache) | One constant read with `javap` (§10.4). jetcd 0.8.7 declares grpc 1.82.0. |
 
 **Path abbreviations** used in citations:
@@ -29,11 +30,13 @@
 - The GitHub REST API, for issue and PR bodies and comment threads in `etcd-io/etcd`, `etcd-io/jetcd` and `kubernetes/kubernetes`. A few threads could only be read through a tool that summarizes pages with a smaller model; claims from them are marked "(summarized fetch)" and are weaker evidence (details in Appendix D).
 - `git tag --contains` on merge and backport commits, for every fix version stated as "verified".
 - **One Docker functional test** (2026-10-31; Appendix C): the official `v3.7.3` image, a 3-member cluster and `etcd grpc-proxy` on this host, run twice. It checks behaviour only; it is not a benchmark (AGENTS.md §7). The 2026-11-01 revisions ran no tests.
+- **Jepsen pass (2026-11-09):** the Jepsen etcd 3.4.3 report and its watch test source read in full, its watch issue (#11496) traced through the GitHub API, and the fix checked in the v3.7 docs and at `v3.7.3` (§2.5). The jetcd 0.8.2 report (2024) did not test watches. Nothing run.
 - Confidence tags (High / Moderate / Low) apply to the claim they follow, not to the whole document. "Inferred" means derived from code reading only.
 
 **Upstream references:** the most important are:
 - etcd: [#21813](https://github.com/etcd-io/etcd/issues/21813), [#22184](https://github.com/etcd-io/etcd/issues/22184), [#22673](https://github.com/etcd-io/etcd/issues/22673), [#17611](https://github.com/etcd-io/etcd/issues/17611), [#19710](https://github.com/etcd-io/etcd/issues/19710), [#8980](https://github.com/etcd-io/etcd/issues/8980), [#15271](https://github.com/etcd-io/etcd/issues/15271), [#17529](https://github.com/etcd-io/etcd/issues/17529), [#20221](https://github.com/etcd-io/etcd/issues/20221);
 - jetcd: [#1379](https://github.com/etcd-io/jetcd/issues/1379), [#946](https://github.com/etcd-io/jetcd/issues/946);
+- Jepsen: [etcd 3.4.3](https://jepsen.io/analyses/etcd-3.4.3) and its watch issue [#11496](https://github.com/etcd-io/etcd/issues/11496);
 - Kubernetes: [#59848](https://github.com/kubernetes/kubernetes/issues/59848), [#123072](https://github.com/kubernetes/kubernetes/issues/123072), [KEP-2340](https://github.com/kubernetes/enhancements/tree/master/keps/sig-api-machinery/2340-Consistent-reads-from-cache).
 
 Appendix D has the full list. Appendix A lists the fixed watch-guarantee violations, Appendix B the open upstream items.
@@ -43,6 +46,7 @@ Appendix D has the full list. Appendix A lists the fixed watch-guarantee violati
 - A second pass the same day examined `WithRequireLeader` in depth and ran the Docker test.
 - Revised 2026-11-01 using the Codex and Antigravity watch analyses (`watchers-codex.md`, `watchers-agy.md`) as leads. Every adopted item was re-verified, so this file does not depend on them.
 - Restructured for readability the same day.
+- Extended 2026-11-09 with the Jepsen etcd 3.4.3 results (§2.5), at the user's request.
 
 Appendix E has the revision history, the use made of the peer analyses, and a map from old section numbers to new ones.
 
@@ -55,7 +59,7 @@ It covers the etcd v3.7.3 server, the Go client, jetcd 0.8.7, the etcd gRPC prox
 **Terms used throughout**
 - **Revision:** etcd's cluster-wide logical clock. Every committed modification gets one, assigned identically on every member as it applies the Raft log.
 - **Serving member:** the etcd member that holds the client's watch gRPC stream.
-- **"Now" watch:** a watch created without a start revision (`start_revision = 0`). It starts after the serving member's current revision. A **historical** watch starts below that revision; a **future** watch starts above it.
+- **"Now" watch:** a watch created without a start revision (`start_revision = 0`). It starts after the serving member's current revision. A **historical** watch starts below that revision; a **future** watch starts above it. Revision 0 never means "from the beginning": the first revision is 1 (Jepsen, #11496; §2.5).
 - **`Created` response:** the server's acknowledgement that a watch was registered. Its header carries the serving member's current revision.
 - **Progress notification** (also *bookmark*): a watch response with no events. It states that all events up to its header revision have been delivered on that stream.
 - **Synced / unsynced watcher:** a watcher that is caught up with the member's store, or one that the server is still feeding from history in batches.
@@ -214,6 +218,85 @@ Three consequences for how clients and testers should reason (raised by the Code
 - **The library's cursor is not the application's cursor.** The resume revision a client library keeps records what the *library* received, not what the application has applied. A process that crashes between the two must resume from a cursor stored together with its own state, or relist.
 - **A relist restores current state, not the transitions in between.** After a compaction error, an application that needs every intermediate change has no recovery path; one that needs only the current state does.
 
+### 2.5 What Jepsen tested (etcd 3.4.3, 2020)
+
+Added 2026-11-09. Sources: the [report](https://jepsen.io/analyses/etcd-3.4.3)
+and its watch workload at `jepsen-io/etcd` @ `16149cb`
+(`src/jepsen/etcd/watch.clj`, `client.clj`). Jepsen has published no later
+watch test; its 2024 jetcd report did not test watches.
+
+**Result.** "Watches appear correct, at least over single keys. So long as
+compaction does not destroy historical data while a watch isn't running,
+watches appear to deliver every update to a key in order."
+- The faults: partitions (single nodes, majority and minority,
+  non-transitive), crashes and pauses (including of the leader), clock skew
+  up to hundreds of seconds, and membership changes.
+- This is independent evidence for the safety half of §3, at 3.4.3.
+
+— **High** (for what was observed).
+
+**What the test design could and could not see** (from the source).
+- **One key, one member per client.** Writers set one key to unique
+  integers. Each client had a single endpoint (`client.clj:172-179`) and
+  used jetcd 0.4.1 (`project.clj`).
+- **Watches were rotated.** Each watch ran for a random 0–5 s, then was
+  closed and re-created from the last revision seen + 1
+  (`watch.clj:142-143`, `:199-204`, `:228`), on the same member. A watch
+  that went silent was closed within 5 s anyway, and its successor resumed
+  from the same revision, so silence during a fault left no trace in what
+  was checked: the test could not tell it from slow delivery.
+- **The check ran after the faults.** In the final phase, after the cluster
+  was healed and a 10 s wait (`src/jepsen/etcd.clj:112-116`), every watcher
+  kept re-watching until all reached the same revision, and the checker then
+  compared their logs (`watch.clj:235-255`, `:316-345`). That tests that
+  history is complete and ordered once the cluster is healthy. It does not
+  test that a watch keeps delivering while its member is cut off.
+- **The cursor came from events.** The harness advances its cursor to the
+  highest `mod_revision` received. A comment records that using the
+  response header's revision instead "sometimes" produced non-monotonic
+  revisions (`watch.clj:153-157`).
+  - Jepsen gives no cause. The likely one is the mechanism behind §10.3:
+    while a watcher catches up, each batch's header carries the member's
+    current revision, ahead of the batch's own events
+    (`mvcc/watchable_store.go:388`; §1 fact 4). A cursor taken from that
+    header jumps past events still to come. — **Moderate** (cause
+    inferred).
+- **Compaction was excluded, and snapshot restore was probably rare.**
+  Restoring a snapshot on a lagging member requires the leader to have
+  compacted its Raft log. At 3.4's defaults that happens only every 100,000
+  applied entries, keeping 5,000 for slow followers
+  (`etcdserver/server.go:69`, `:76 @ v3.4.3`). Whether Jepsen's runs got
+  that far is unknown.
+
+**Consequences for this file.** — **Moderate**.
+- **Jepsen's result and the later bugs are compatible.** The violations
+  fixed later (Appendix A) sit on paths this workload rarely or never
+  exercised: compaction (#17529, #18089, #19179), and snapshot restore or
+  cross-member resume (#15271, #19487 / #20221). Appendix A dates them to
+  3.4 releases; whether each was present in 3.4.3 was not checked.
+- **It says nothing about liveness** (§3). Its rotation is itself a
+  mitigation, a weak form of the freshness monitor in §13.2 item 8.
+
+**Revision 0** ([#11496](https://github.com/etcd-io/etcd/issues/11496),
+filed by Jepsen 2020-01-06). — **High** (docs and code read).
+- **The finding.** A watch from revision 0 starts at the serving member's
+  current revision + 1, not at the first revision, and this was
+  undocumented. Jepsen's harness says the same in a comment: "Definitely
+  don't pass 0, or you'll get wherever it is currently" (`watch.clj:142`).
+- **The fix, in docs only.** PR [#11559](https://github.com/etcd-io/etcd/pull/11559)
+  (merged 2020-01-27):
+  - the data model page says "the initial revision is 1" (v3.7 docs,
+    `learning/data_model.md:15`, `etcd-io/website` @ `41e5cd6ab9ef`);
+  - the Go client's `Watch` comment says that a revision of 0 or unspecified
+    returns "watch events that happen after the server receives the watch
+    request" (`client/v3/watch.go:68-69`).
+- **Still imprecise.** That comment is looser than the code. "After" means
+  after the serving member's applied revision, which on a lagging member
+  precedes the request in real time (§1 fact 1). The v3.7 API reference
+  describes only the unset case: "If not given, it will stream events
+  following the revision of the watch creation response header revision"
+  (`learning/api.md:412`).
+
 ## 3. The premise, tested
 
 The premise: "watches don't go through Raft, so they break on leader failover".
@@ -225,6 +308,7 @@ The premise: "watches don't go through Raft, so they break on leader failover".
 
 **The incorrect part (High).** Safety, and the restriction to failover.
 - Leader failover by itself does not threaten watch correctness. Events derive from committed entries, so entries truncated on an old leader are never emitted. Revisions are identical on every member, so a client can resume anywhere at `lastRevision+1`.
+- Jepsen's etcd 3.4.3 tests agree: under partitions, crashes, pauses, clock skew and membership changes, single-key watches resumed from their last revision delivered every update in order (§2.5).
 - On members that stay healthy, a failover shows up only as a pause: nothing commits during the election.
 - The member that matters is the *serving* member. A follower cut off by a partition is exactly as dangerous as a deposed leader.
 
@@ -787,6 +871,7 @@ It then reads the queued response, followed by a bare close.
 | Reconnect after long outage | resume can wait up to ~2 min for grpc-java's backoff; likely silent under default wait-for-ready ([#1616](https://github.com/etcd-io/jetcd/issues/1616), open; PR #1617 excludes watches; §5.4) | not checked |
 
 **Other jetcd reports (not verified).**
+- [jetcd#674](https://github.com/etcd-io/jetcd/issues/674) (and duplicate #673), filed by Jepsen in 2019 with jetcd 0.4.1: creating a watch occasionally threw `IllegalStateException: Stream is already completed`, from `WatchImpl$WatcherImpl.resume`. Closed by the stale bot in 2020 without a fix. jetcd's watch client has since moved to Vert.x streams (`jetcd/impl/WatchImpl.java:44-45`); whether a similar race survives was not checked.
 - [jetcd#1352](https://github.com/etcd-io/jetcd/issues/1352): watcher not reconnecting after the leader pod dies; status "waiting-for-feedback" (summarized fetch). The report claims jetcd 0.7.5, but its stack trace names `jetcd-core-0.5.7.jar`, and its error handler opens a new watch from inside `onError` (noted by the Codex analysis; not re-checked by me). Treat it as undiagnosed for 0.8.7.
 - [jetcd#1379](https://github.com/etcd-io/jetcd/issues/1379): the original error was the 4 MiB limit (§10.4); after raising it, the reporter found the remaining "silence" was a logging problem, and the thread moved on to KV errors. (*Corrected 2026-11-01*: the first version of this file described it as "stops after 10–15 changes with no error".)
 - [etcd#13822](https://github.com/etcd-io/etcd/issues/13822) / [jetcd#1055](https://github.com/etcd-io/jetcd/issues/1055) (2022, closed with no comments): jetcd 0.5.0 watchers received nothing after isolation followed by compaction, on etcd 3.4.13. Consistent with the then-unfixed #17529 or with an unhandled compaction cancel; never diagnosed.
@@ -875,8 +960,8 @@ The last two rows explain why etcd's watch defects matter more than Chubby's los
 
 ### 13.2 For every watch client
 
-5. **Resume from your own cursor, stored with your state.** Persist the last applied revision atomically with whatever the application derives from events. The library's internal resume point (Go `nextRev`, jetcd `revision`) records receipt, not application, and is lost on restart or `ErrNoLeader` (§2.4, §6.3).
-6. **Never re-create a watch from "now" after an error.** Watch from an explicit revision (list, then watch from revision + 1, as Kubernetes does), or request `WithCreatedNotify` and record the `Created` header revision. Resume from the last revision you received: event, bookmark or `Created` (§6.3 item 4).
+5. **Resume from your own cursor, stored with your state.** Persist the last applied revision atomically with whatever the application derives from events. The library's internal resume point (Go `nextRev`, jetcd `revision`) records receipt, not application, and is lost on restart or `ErrNoLeader` (§2.4, §6.3). Take the cursor from the events' `ModRevision` (or a progress notification), never from an event batch's header revision, which runs ahead while a watcher catches up; Jepsen's harness hit exactly this (§2.5).
+6. **Never re-create a watch from "now" after an error.** Watch from an explicit revision (list, then watch from revision + 1, as Kubernetes does), or request `WithCreatedNotify` and record the `Created` header revision. Resume from the last revision you received: event, bookmark or `Created` (§6.3 item 4). To replay from the beginning, pass 1, not 0 (§2.5).
 7. **Always set `WithRequireLeader`** (Go) or `withRequireLeader(true)` (jetcd), and handle `ErrNoLeader` by re-watching from your last revision + 1.
 8. **Build a freshness monitor** where freshness matters; nothing else detects §5.2 or a congested stream (Moderate).
    - Periodically read a linearizable revision R, for example `Get(key, WithLimit(1))` and its header revision.
@@ -942,7 +1027,7 @@ Per AGENTS.md §7, the tests below would run on this host only as functional tes
 
 The premise is right about liveness and wrong about safety (revised 2026-11-03; §3).
 - **Liveness: right.** etcd claims eventual consistency for watches, and watches break it with the quorum intact. The watch path never consults Raft's quorum, so a member cut off from it, such as a deposed leader after a partition-induced failover, keeps its watches open and silent until it rejoins, which may be never (§3, §5.1). `WithRequireLeader` closes that case only; with it, a member that keeps a leader but does not apply, a blocked raft loop, a frozen stream, the Go client's teardown and error-delivery defects, and the gRPC proxy still leave watches silent (Summary; §5.2, §6.3). What escapes Raft is the answer to "is this watch up to date, and is it still moving?": the start point, the `Created` revision and every bookmark are one member's local view (§1). — **High**.
-- **Safety: wrong.** Watch events are derived from Raft-committed entries, so leader failover cannot make a watcher see uncommitted data, and a client that resumes from its own last revision loses nothing on any member (§1, §3). The failover bugs that did break safety guarantees were bugs in member-local recovery code, and all known ones are fixed (§7). — **High**.
+- **Safety: wrong.** Watch events are derived from Raft-committed entries, so leader failover cannot make a watcher see uncommitted data, and a client that resumes from its own last revision loses nothing on any member (§1, §3). Jepsen's etcd 3.4.3 tests reached the same result independently, for single keys without compaction (§2.5). The failover bugs that did break safety guarantees were bugs in member-local recovery code, and all known ones are fixed (§7). — **High**.
 - **Failover is a trigger, not the condition.** Cut-off followers, members that have a leader but do not apply, the gRPC proxy and the client libraries break eventual delivery without any failover (§4). — **High**.
 
 ### 15.2 On the design hypothesis
@@ -1066,6 +1151,7 @@ Supports §9.1 and the timings in §5.1. Image: `gcr.io/etcd-development/etcd:v3
   - The unauthenticated API quota ran out during the first session (other agents share this IP). After that, a few threads were read through a web-fetch tool that **summarizes pages with a smaller model**: etcd #15220, #16839 and #20221; Kubernetes #89488, #97294 and #123072; jetcd #1352. Claims from those threads are marked "(summarized fetch)" and are weaker evidence than raw reads.
 - **etcd's robustness track record** (`tests/robustness/README.md:19-39`): etcd's own ledger of correctness bugs found by its fault-injection tests (§7).
 - **Peer analyses** (2026-11-01 revision): `analysis/watchers-codex.md` and `analysis/watchers-agy.md`, used only as leads (Appendix E).
+- **Jepsen** (2026-11-09 revision): the [etcd 3.4.3 report](https://jepsen.io/analyses/etcd-3.4.3) and its test source at `jepsen-io/etcd` @ `16149cb` (`src/jepsen/etcd.clj`, `src/jepsen/etcd/{watch,client}.clj`, `project.clj`), fetched raw from GitHub (§2.5).
 
 ### D.2 Upstream references
 
@@ -1142,6 +1228,11 @@ lease-side issues still open: [#22081](https://github.com/etcd-io/etcd/issues/22
 
 **Other:** [golang/go#58804](https://github.com/golang/go/issues/58804).
 
+**Jepsen (§2.5):**
+[Jepsen: etcd 3.4.3](https://jepsen.io/analyses/etcd-3.4.3) (2020-01-30);
+etcd [#11496](https://github.com/etcd-io/etcd/issues/11496) / PR [#11559](https://github.com/etcd-io/etcd/pull/11559) (revision 0, docs, 2020-01-27);
+jetcd [#673](https://github.com/etcd-io/jetcd/issues/673), [#674](https://github.com/etcd-io/jetcd/issues/674) (2019 watch-creation exception, stale-closed).
+
 ## Appendix E. Revision history and use of the other watch analyses
 
 ### E.1 Versions of this file
@@ -1156,6 +1247,7 @@ lease-side issues still open: [#22081](https://github.com/etcd-io/etcd/issues/22
 | 2026-11-02 | Caveat on the delivery disclaimer ("events in unhealthy clusters might never arrive") added to the Summary, §2.2, §12.2 and §15.2. It covers: "unhealthy" is undefined; the disclaimer has effect only with the quorum intact; the contract is therefore safety-only and contradicts etcd's claim of eventual consistency. Points to `etcd-issues-and-mitigations-claude.md` §3. Re-read for it at `v3.7.3`: `etcdctl/ctlv3/command/ep_command.go`, `server/etcdserver/server.go`, `tests/robustness/README.md`. No findings or ratings changed. |
 | 2026-11-03 | **Premise verdict revised** after the user pointed out that eventual consistency, which etcd claims for watches, is a liveness promise: from "mostly wrong" to "right about liveness, wrong about safety". The earlier verdict counted only the six safety guarantees of §2.1 as promises. Changed: Terms (the "documented"/"intuitive" split replaced by safety guarantee / eventual delivery / timeliness); the Summary's first, second, third, fifth and last bullets (the 2026-11-02 caveat folded into the third); §2.4; §3 (correct and incorrect parts, a failure condition for the liveness half, a revision note); the §4 "Promise affected" labels; §12.2 (one bullet and the assessment); §15.1, §15.2 and §15.4. No new code reading: the evidence is the existing findings of §5–§10, plus `tests/robustness/README.md:102`, `:111` at `v3.7.3`, re-read. No other findings or confidence ratings changed. |
 | 2026-11-03 | **`WithRequireLeader` limits made explicit in the Summary**, after the user read the revised first bullet as implying that the option restores liveness. New Summary bullet listing the paths that stay silent with the option set; first bullet reworded; key findings 2, 3 and 7 extended. **New finding:** a blocked raft loop (for example a WAL `fdatasync` that does not return) freezes the member's leader view, so neither `WithRequireLeader` nor client keepalive ends its watches (§5.2, §6.3 item 1; High for the mechanism, from code, not reproduced). Also: §13.2 item 8 (recreate the client if a re-watch blocks; match `RequestProgress` metadata), §14.1 test 7 (a `raftBeforeSave` sleep), §15.1 and §15.3. Code read at `v3.7.3`: `etcdserver/raft.go:174-260`, `v3rpc/interceptor.go:236-243`, `:315-354`, `server/storage/wal/wal.go:869-881`. GitHub API: #17611 (title and thread re-read) and one issue search for disk stalls. `watchers-agy.md` §3.1.2 (its nine `WithRequireLeader` failure modes) checked against §6.3: each was already covered here, and none includes the blocked raft loop. `watchers-codex.md` §2.6 (2026-11-03) reached the same blocked-raft-loop counterexample independently; I read it only after writing §5.2. |
+| 2026-11-09 | **Jepsen pass**, at the user's request. New §2.5: what Jepsen's etcd 3.4.3 watch test showed and what its design could not see (watch rotation under 5 s, one key, one member per client, a check only after healing, no compaction), its header-revision comment explained from code, and the revision-0 finding (#11496) with its 2020 doc fix. Also: Terms ("now" watch), §3, §10.5 (jetcd #673/#674), §13.2 items 5 and 6, §15.1, Appendix D. Read: the report, `jepsen-io/etcd` @ `16149cb` source, PR #11559, the v3.7 docs at `etcd-io/website` @ `41e5cd6ab9ef`, `mvcc/watchable_store.go:294-297`, `:388` and `etcdserver/server.go @ v3.4.3`. No earlier finding or rating changed. Nothing run. |
 
 **Old → new section numbers** (for references made before the restructuring):
 

@@ -5,7 +5,7 @@
 | Component | Version | Notes |
 |---|---|---|
 | etcd | `v3.7.3` = `0a173d0410a9` | All `path:line` citations are at this tag unless stated otherwise. |
-| jetcd | `jetcd-0.8.7` = `23b61f1499a5` | `LeaseImpl.java` read in full (§5.3). |
+| jetcd | `jetcd-0.8.7` = `23b61f1499a5` | `LeaseImpl.java` read in full (§5.3). For §5.4 (2026-11-09): `support/Errors.java`, `impl/{Impl,KVImpl,LockImpl,ElectionImpl}.java`, `ClientBuilder.java`, and commit `05f92e0`. `jetcd-0.8.8` was released on 2026-11-09 and is not analyzed. |
 | Raft library | `go.etcd.io/raft/v3` `v3.7.0`, the version pinned in `server/go.mod:30` | Only `raft.go`, fetched from the `etcd-io/raft` tag. Used for proposal forwarding (§3.2) and for tick and CheckQuorum timing (§3.4, R1). |
 | Kubernetes | `master` at `3c690c189e5d` (fetched 2026-10-31); two files at tag `v1.37.2` | The `master` files are "current Kubernetes", not a release (§7). |
 
@@ -21,6 +21,14 @@ Upstream state was re-checked on 2026-11-01:
 - The GitHub REST API, for issue and PR bodies and comment threads in
   `etcd-io/etcd`, `etcd-io/jetcd` and `kubernetes/kubernetes`.
 - Web sources (Jepsen, etcd.io docs).
+- **Jepsen pass (2026-11-09):** the reports
+  [etcd 3.4.3](https://jepsen.io/analyses/etcd-3.4.3) (2020-01-30) and
+  [jetcd 0.8.2](https://jepsen.io/analyses/jetcd-0.8.2) (2024-08-08), read
+  in full; Jepsen's lock and client source at `jepsen-io/etcd` @ `16149cb`
+  (2019) and its 2024 harness defaults at `fbe693e`; every issue the
+  reports cite, through the GitHub API; the fixes, in code at `v3.7.3` and
+  `jetcd-0.8.7`; and the v3.7 lock docs (`etcd-io/website` @
+  `41e5cd6ab9ef`). Results: §2.3, §5.4, §8.
 
 **Nothing was run or reproduced.** "Inferred" and "traced" mean derived from
 code reading only. Confidence tags (High / Moderate / Low) apply to the claim
@@ -28,7 +36,8 @@ they follow, not to the whole document.
 
 **Upstream references:** the most important are:
 - etcd [#15247](https://github.com/etcd-io/etcd/issues/15247), [#12528](https://github.com/etcd-io/etcd/issues/12528), [#22649](https://github.com/etcd-io/etcd/issues/22649), [#18428](https://github.com/etcd-io/etcd/pull/18428), [#13915](https://github.com/etcd-io/etcd/issues/13915) and [#9888](https://github.com/etcd-io/etcd/issues/9888);
-- Kubernetes [#65497](https://github.com/kubernetes/kubernetes/issues/65497) and [#110210](https://github.com/kubernetes/kubernetes/issues/110210).
+- Kubernetes [#65497](https://github.com/kubernetes/kubernetes/issues/65497) and [#110210](https://github.com/kubernetes/kubernetes/issues/110210);
+- from the Jepsen reports: etcd [#11456](https://github.com/etcd-io/etcd/issues/11456), [#11457](https://github.com/etcd-io/etcd/issues/11457), [#14890](https://github.com/etcd-io/etcd/issues/14890), [#18424](https://github.com/etcd-io/etcd/issues/18424); jetcd [#1444](https://github.com/etcd-io/jetcd/issues/1444) / PR [#1445](https://github.com/etcd-io/jetcd/pull/1445).
 
 Appendix B has the full list with states and dates. Appendix A is the issue
 survey.
@@ -41,6 +50,8 @@ survey.
   source of leads. Every adopted item was re-verified, so this file does not
   depend on them.
 - Restructured for readability the same day.
+- Extended 2026-11-09 with the Jepsen reports and the state of their fixes
+  (§2.3, §5.4, §8), at the user's request.
 
 Appendix C has the revision history and a map from the old section numbers
 to the new ones.
@@ -132,11 +143,14 @@ Chubby?
 | 8 | Client lease deadlines are optimistic (receipt time + TTL, checked once a second) | By design in both clients; a window of about 1 s, unbounded with process pauses | High (code); Moderate (size) | 5.1 |
 | 9 | Keepalives forwarded by followers still block on the leader's apply backlog. Expiry costs one Raft proposal per lease, and one root token per revocation when auth is on | Code structure; not measured | High (code); Low–Moderate (magnitude) | 6 |
 | 10 | Kubernetes is insulated from the P3 bugs (it never calls `KeepAlive`). It is exposed to P2 (Events), to revocation cost, and to the open watch bug #110210 | — | High (code); Moderate ("insulated") | 7 |
-| 11 | Process: the core failover bug was closed once by a stale bot; both redesign trackers were closed *not planned*; the correctness harness does not exercise expiry or keepalive | — | High | 3.7, 8 |
+| 11 | Process: the core failover bug was closed once by a stale bot; both lease redesign trackers were closed by the project's stale bot while their `stage/tracked` label should have exempted them, and neither has been reopened since; the correctness harness does not exercise expiry or keepalive | — | High | 3.7, 8 |
+| 12 | Automatic retries (Jepsen, jetcd 0.8.2). jetcd ≤ 0.8.3 retried writes after indefinite failures, which Jepsen showed as lost updates and aborted reads. Both clients still retry lease grant and revoke, and jetcd retries `Lock`, whose in-flight first attempt can delete the key the retry reused | jetcd write retries fixed in 0.8.5 (#1444). Lease and lock retries: by design; the lock race is not reported upstream | High (code); Low (lock race likelihood; inferred) | 5.4 |
 
 **What protects applications is fencing.** No lease design gives mutual
 exclusion by itself. With fencing through etcd transactions, writes to etcd
-stay correct even under finding 1 (§2.3).
+stay correct even under finding 1 (§2.3). Jepsen measured the difference on
+etcd 3.4.3: unfenced locks lost about 18 % of acknowledged updates, and
+lock-guarded transactions lost none in its tests (§2.3).
 
 ---
 
@@ -264,7 +278,7 @@ Two consequences follow.
 | P1 | Replicas agree on which keys exist; KV reads stay linearizable despite lease activity | Holds (§1.2) | High |
 | P2 | **Upper bound:** a lease that is not renewed is revoked about TTL after its last renewal | **Violated by design** on every leader change and restart (reset to TTL + ET). Unbounded under repeated leader changes. The mitigation is off by default, and even when on it does not cover TTL ≤ 5 min or leader changes more frequent than the checkpoint interval (§1.4) | High |
 | P3 | **Lower bound:** a lease is not revoked within TTL of a keepalive the server acknowledged (explicit client `LeaseRevoke` excluded) | Violated on failover before the fixes (#12528, #15247). Fixed for the reported scenarios in v3.4.31, v3.5.13 and v3.6.0. Narrow residual windows remain (§3.4: R1, R2, R5). With the Alpha checkpoint gate on, #22649 violates it outright (§3.5) | High (history); Moderate (residual) |
-| P4 | Lease reads (`TimeToLive`, `Leases`, the TTL in keepalive responses) are linearizable | Not provided ([#13915](https://github.com/etcd-io/etcd/issues/13915), closed not planned). `FastLeaseKeepAlive` adds a deliberate exception (§2.4). Response-header revisions on lease RPCs are not snapshot points, and on "not found" answers can precede the revocation (§2.5) | High |
+| P4 | Lease reads (`TimeToLive`, `Leases`, the TTL in keepalive responses) are linearizable | Not provided ([#13915](https://github.com/etcd-io/etcd/issues/13915), closed *not planned* by the stale bot while its tracked-issue exemption was ignored; §3.7). `FastLeaseKeepAlive` adds a deliberate exception (§2.4). Response-header revisions on lease RPCs are not snapshot points, and on "not found" answers can precede the revocation (§2.5) | High |
 | P5 | Mutual exclusion for locks built on leases | Not provided by leases in any design (etcd docs, Jepsen, Chubby). Requires fencing with the lock key's revision (§2.3) | High |
 
 P1 holds, but it is **not** the property that leader election and locks
@@ -326,6 +340,73 @@ effects, and any etcd write that omits the compare.
 - Meanwhile, a successor has already been elected.
 - The result is dual leadership caused by the server, not by a slow client.
   — **Moderate** (derived from code, not measured).
+
+**Jepsen's measurements** (etcd 3.4.3, 2020; added 2026-11-09). Jepsen's
+lock workloads took a lease per acquisition, kept it alive with jetcd
+0.4.1's keep-alive, and called the server Lock API (`jepsen-io/etcd` @
+`16149cb`, `src/jepsen/etcd/lock.clj`; jetcd version from its
+`project.clj`).
+- **Healthy clusters are enough.** With TTLs of 1, 2 and 3 s, locks
+  "generally failed to provide mutual exclusion after only a few minutes of
+  testing, even in healthy clusters"; pauses and partitions made it faster.
+  The report does not say why the leases expired without faults; the
+  #11456 thread says only that keep-alive failed to maintain the lease.
+  — **High** (Jepsen's observation, on 3.4.3).
+- **Etcd raises short TTLs.** The server grants at least
+  `ceil(1.5 × election ticks × heartbeat)`, 2 s at the defaults
+  (`server/etcdserver/server.go:340`, `:345`;
+  `server/lease/lessor.go:301-302`; the same formula at `v3.4.3`). Jepsen's
+  harness passed no timing flags to etcd (`src/jepsen/etcd/db.clj:74-84`),
+  so its 1 s TTL ran as 2 s (inferred from the defaults; Jepsen does not
+  say).
+- **Unfenced use loses data.** Five processes updated an in-memory set
+  under the lock, reading it, then writing it back about a second later.
+  With 2 s TTLs and a process pause every 5 s, about 18 % of acknowledged
+  updates were lost.
+- **Fenced use did not.** A variant wrote a set stored in etcd with one
+  transaction guarded on the holder's lock key (`Version(key) > 0`). That
+  "safely isolated read-modify-write operations" in Jepsen's tests. The
+  guard is equivalent to `IsOwner()` once the lock has been granted: the
+  key is `name/leaseID`, unique to the lease, and every later waiter waits
+  for its deletion (`client/v3/concurrency/mutex.go:115-123`). Jepsen adds
+  that fencing gives isolation, not atomicity: a holder that loses the lock
+  part-way through a multi-step update leaves the steps already done.
+
+**#11456: a waiter told it held the lock after losing its lease.**
+- **The bug.** `Mutex.Lock` returned success after `waitDeletes` without
+  checking that its own key still existed, so a waiter whose lease expired
+  while it waited was told it held the lock (Jepsen, 2019).
+- **The fix.** Commit `b14c7cd44` ("concurrency: make lock more reliable")
+  adds a `Get` of the waiter's own key after waiting, and returns
+  `ErrSessionExpired` if the key is gone (`mutex.go:96-105`).
+  - First release v3.5.0 (2021-06-15). It is in no 3.4 release: absent at
+    `v3.4.4`, `v3.4.10`, `v3.4.42` and `origin/release-3.4`.
+  - jetcd's `Lock` is served by the same code: the server's Lock handler
+    calls `concurrency.NewMutex(...).Lock`
+    (`server/etcdserver/api/v3lock/lock.go`).
+- **Its limit.** The check is a point-in-time read. As the maintainer who
+  wrote the fix said (quoted in the issue), it "wont completely solve the
+  problem": the
+  lease can still expire before the reply arrives, so fencing stays
+  necessary. The waiter is still not woken when its own key is deleted
+  (#19597; TODO at `mutex.go:88`). — **High** (code and git).
+
+**Documentation** ([#11457](https://github.com/etcd-io/etcd/issues/11457);
+v3.7 docs at `etcd-io/website` @ `41e5cd6ab9ef`).
+- **What changed.** PR #11490 (2020-03-05) added "Notes on the usage of
+  lock and lease" to the "why etcd" page (`learning/why.md:82-98`). The
+  notes say "the lease mechanism itself doesn't guarantee mutual exclusion"
+  and that resources outside etcd must validate the revision themselves.
+- **What did not change**, at v3.7.3:
+  - The same page lists "APIs for safe distributed shared locks" (`:46`).
+  - The Lock RPC reference describes no guarantee for the lock itself
+    (`dev-guide/api_concurrency_reference_v3.md:13`).
+  - `etcdctl/README.md:1175-1179` still shows
+    `etcdctl lock mylock ./etcdctl put foo bar`, the unfenced pattern
+    Jepsen cited. `etcdctl lock` exports the fencing token to its command
+    as `ETCD_LOCK_REV` (`:1157`), but no example uses it.
+
+— **High** (text read).
 
 ### 2.4 `FastLeaseKeepAlive` and P4
 
@@ -818,9 +899,9 @@ else revokes.
 | 2023-12 / 2024-03 | ReadIndex safeguard merged (#16822); backported (v3.5.13, v3.4.31) |
 | 2024-03 | jetcd commit `10b07f5` (first released in 0.8.0) starts reporting every keep-alive stream error through `onError` while continuing to renew (jetcd #1322, §5.3) |
 | 2024-08 | Safeguard short-circuited for performance (#18428); post-merge safety objection |
-| 2025-09 | Renew/revoke TOCTOU partially fixed (#20590); checkpoint tracker #13776 closed not planned |
+| 2025-09 | Renew/revoke TOCTOU partially fixed (#20590); checkpoint tracker #13776 closed *not planned* by the stale bot (its `stage/tracked` exemption was not being applied; see "Reading the timeline"); #13915 closed by the bot, then reopened by a maintainer |
 | 2025-10 | `FastLeaseKeepAlive` merged (#20589): leader skips the apply wait for known leases; the follower-forwarding path keeps it (§6.1) |
-| 2025-12 | #13915 closed not planned (stale bot) |
+| 2025-12 | #13915 closed *not planned* by the stale bot again, with the exemption still not applied |
 | 2026-06 | Fix PR for the remaining renew/revoke race (#21389) closed unmerged (stale) |
 | 2026-10 | #22649 (checkpoint error swallowed) open; fix PR #22650 open |
 
@@ -835,7 +916,16 @@ else revokes.
   - both redesign trackers,
     [#13915](https://github.com/etcd-io/etcd/issues/13915) and
     [#13776](https://github.com/etcd-io/etcd/issues/13776), were closed *not
-    planned* by bots;
+    planned* by the project's stale bot. Both carried `stage/tracked`, the
+    label meant to exempt an issue from auto-closing. From 2025-05-13 to
+    2026-01-13 the bot's workflow used input names the GitHub Action does
+    not recognize, so the exemption was ignored (fixed in commit
+    `55c5fabe5`), and both closures fall in that window. #13915 was closed
+    on 2025-09-11, reopened by a maintainer on 2025-09-23, and closed again
+    on 2025-12-19. Neither has been reopened since. "Not planned" is the
+    reason the bot records, not a maintainer's verdict on the designs; for
+    a user of etcd the outcome is the same, because the bot is part of the
+    project's process (corrected 2026-11-09);
   - etcd's linearizability harness does not exercise lease expiry or
     keepalive at all (§8).
 
@@ -1198,6 +1288,134 @@ unless stated. Code facts are **High**; consequences are traced, not run.
   (open; jetcd 0.7.7, etcd 3.5.13) reports `onCompleted` firing after several
   minutes of keep-alive. I read only the report; it is not analyzed here.
 
+### 5.4 Automatic retries of non-idempotent RPCs (Jepsen, jetcd 0.8.2)
+
+Added 2026-11-09. Code facts are at `jetcd-0.8.7` and `v3.7.3` (**High**);
+jetcd paths are under `jetcd-core/src/main/java/io/etcd/jetcd/`. The
+consequences for lease and lock RPCs are traced from code, not run.
+
+**What Jepsen found** ([jetcd 0.8.2](https://jepsen.io/analyses/jetcd-0.8.2),
+2024-08-08).
+- **The defect.** jetcd retried every unary call that failed with
+  `UNAVAILABLE`, including writes already sent. With `kill -9` of servers as
+  the only fault, one `Txn.commit()` went out twice, on separate
+  connections, about 3 s apart, and both copies executed.
+- **What applications saw:** lost update, cyclic information flow (Adya's
+  G1c), a transaction that read its own future write, and aborted read
+  (G1a).
+- **Why guards do not help.** In the aborted-read case the first copy
+  committed, the retry's guard then failed, and jetcd returned the retry's
+  `isSucceeded() == false`. An indefinite failure was reported as a
+  definite one.
+- **Versions.** jetcd 0.6.0 (2021-12-15) through 0.8.2; 0.5.0 was also
+  evaluated. Jepsen's workaround was `ClientBuilder.retryMaxAttempts(0)`.
+- **History.** Jepsen reported the symptoms in 2022: etcd
+  [#14092](https://github.com/etcd-io/etcd/issues/14092) and
+  [#14890](https://github.com/etcd-io/etcd/issues/14890), jetcd
+  [#1072](https://github.com/etcd-io/jetcd/issues/1072).
+  - etcd closed #14092 "as a jetcd issue"; the stale bot closed jetcd
+    #1072.
+  - etcd closed #14890 on 2024-08-02, a maintainer agreeing to "reject
+    Jepsen report as inaccurate" and betting the cause was Jepsen.
+  - On the report's publication day, etcd opened
+    [#18424](https://github.com/etcd-io/etcd/issues/18424), "etcd Go & Java
+    client SDK's retry mechanism may break `Serializable`". The stale bot
+    closed it *not planned* on 2025-06-01.
+
+**The fix.** jetcd [#1444](https://github.com/etcd-io/jetcd/issues/1444) /
+PR [#1445](https://github.com/etcd-io/jetcd/pull/1445), by this project's
+user. Commit `05f92e0`, merged 2025-02-18; first release `jetcd-0.8.5`
+(2025-03-03, `git tag --contains`). It splits the retry predicate in two
+(`support/Errors.java:29-41`):
+- `isRetryableForSafeRedoOp`: `UNAVAILABLE`, or an auth-token error;
+- `isRetryableForNoSafeRedoOp`: auth-token errors only. The server rejects
+  a request with such an error without applying it, so retrying is safe.
+
+Defaults: 2 retries, with backoff from 500 ms to 2.5 s
+(`ClientBuilder.java:62-64`).
+
+**Which RPCs are retried after `UNAVAILABLE`.**
+
+| Operation | jetcd 0.8.7 | Go client v3.7.3 | Safe to repeat? |
+|---|---|---|---|
+| `Put`, `Delete`, `Txn` | No, unless the caller sets `withAutoRetry()` (`impl/KVImpl.java:69`, `:101`, `:134`) | No, except on an error showing no connection was available (`client/v3/retry.go:85-94`) | No |
+| `Get`; jetcd `compact` | Yes (`KVImpl.java:85`, `:120`) | `Range` yes (`retry.go:108`) | Yes |
+| Lease `grant` | Yes (`impl/LeaseImpl.java:81-99`) | Yes (`retry.go:151`) | **No**: each copy creates a lease |
+| Lease `revoke` | Yes (`LeaseImpl.java:103-110`) | Yes (`retry.go:155`) | The effect is; the reply is not |
+| Lease `timeToLive` | Yes (`LeaseImpl.java:114-125`) | Yes (`retry.go:143`) | Yes |
+| `Lock` (server Lock API) | Yes (`impl/LockImpl.java:61-72`) | — (`concurrency.Mutex` uses `Txn`) | Acquisition yes, by key reuse; see below |
+| `Unlock` | Yes (`LockImpl.java:76-86`) | — (`Delete`, not retried) | The effect is, unless a delayed copy lands after a re-lock (#22082's pattern) |
+| Election calls | No (`impl/ElectionImpl.java:88-91`, `:111-114`, `:126-129`, `:162-165`) | — (recipes use `Txn`) | — |
+
+The Go client also retries any RPC that fails with a deadline or
+cancellation status while the caller's own context is still live
+(`client/v3/retry_interceptor.go:76-82`). The #18424 investigation
+concluded that the server never returns such a status for a request it
+executed, and could not reproduce the problem with the Go client.
+— **Moderate** (their analysis). It is consistent with the server code: a
+proposal's own timeout becomes `ErrTimeout` or one of its variants, all
+`Unavailable` (`parseProposeCtxErr`, `server/etcdserver/server.go:2359-2389`),
+and the Go client does not retry a write on `Unavailable` after connecting.
+
+**Consequences for leases and locks** (inferred; not reproduced).
+- **Orphan lease.** If a `LeaseGrant` executed and its reply was lost, the
+  retry grants a second lease, which the caller receives. The first has no
+  keys and no keep-alive, and expires after its TTL, or later if leader
+  changes intervene (P2). Harmless except as a leak.
+- **A revoke reported as failed.** If a `LeaseRevoke` executed and its reply
+  was lost, the retry finds no lease and returns `NOT_FOUND`, "requested
+  lease not found" (`server/lease/lessor.go:329-333`, mapped at
+  `server/etcdserver/api/v3rpc/util.go:71`). The caller sees a failure for a revoke that
+  succeeded.
+- **jetcd `Lock`: the first attempt can delete the retry's key.**
+  - *Why a retry is idempotent.* The server's Lock handler runs
+    `concurrency.Mutex.Lock` with the call's context. The waiter key is
+    `name/leaseID`, and a second call with the same lease finds that key
+    and reuses its revision (`mutex.go:115-130`).
+  - *Why the first attempt is still a hazard.* jetcd sees `UNAVAILABLE`
+    when its connection fails, but the member's handler may still be
+    waiting. It ends only when the member notices the dead connection,
+    which with default settings can take about two hours (the server pings
+    an idle connection after 2 h, `server/embed/config.go:70`). If it is
+    cancelled while still waiting, its cleanup `m.Unlock(client.Ctx())`
+    deletes `name/leaseID` (`mutex.go:89-93`, `:97-101`), the key the
+    retry reused.
+  - *If the retry is still waiting,* it later finds its key gone and returns
+    `ErrSessionExpired` (`mutex.go:103-105`), although the session is
+    alive: a spurious failure.
+  - *If the retry has already been granted,* the lock key of a client that
+    believes it holds the lock is deleted, and the next waiter is granted
+    the lock. That needs the first handler to be cancelled after the
+    previous holder released, but before it processed the release: a
+    narrow window. A fenced holder is protected, because its guarded
+    writes then fail.
+
+  — **Low** (likelihood; inferred, not reproduced; not reported upstream).
+  The Go recipe is not exposed: it does not retry its `Txn` calls once a
+  connection was established, and its cleanup runs in the caller's own
+  process. Jepsen's harness already guarded against the general problem:
+  after a failed acquisition it revokes the lease, because "our lock request
+  might still be outstanding, and could complete later"
+  (`jepsen-io/etcd` @ `16149cb`, `src/jepsen/etcd/lock.clj:44-56`).
+
+**What applications should do.** — **Moderate** (derived from code and the
+report; untested).
+- jetcd: use 0.8.5 or later, and set `withAutoRetry()` only on writes that
+  are safe to repeat. On 0.6.0–0.8.3, set `retryMaxAttempts(0)`.
+- Both clients: treat a write error that is not a definite rejection (an
+  auth, permission or validation error) as "outcome unknown", and resolve
+  it by reading. A failed compare is not an error: it is a definite answer
+  (`Succeeded == false`), but only for the attempt that returned it. Writing a unique value or request ID makes the
+  read conclusive; Jepsen gives "committing only if a unique ID for that
+  operation has not already been applied" as an idempotent form.
+- Treat `NOT_FOUND` from a revoke as success.
+- jetcd `Lock`: if a call fails or was retried, either revoke the lease
+  (which deletes every waiter key it owns) or confirm ownership with a
+  fenced write before acting.
+- etcd keeps no table of executed client requests, the remedy the Raft
+  paper (§8) prescribes for duplicate commands, as a commenter on #18424
+  pointed out. Deduplication therefore stays with the client.
+
 ## 6. Performance structure of renewal and expiry
 
 Everything here is structure read from code at `v3.7.3`, plus field reports
@@ -1390,10 +1608,22 @@ Verified at `master` on 2026-10-31, except where tagged `v1.37.2`.
   failover. Its findings bear on P5:
   - "etcd locks (like all distributed locks) do not provide mutual
     exclusion. Multiple processes can hold an etcd lock concurrently, even in
-    healthy clusters with perfectly synchronized clocks" (with process pauses
-    and 1–3 s TTLs).
+    healthy clusters with perfectly synchronized clocks". The healthy-cluster
+    failures used 1–3 s TTLs; the ~18 % lost updates used 2 s TTLs and
+    process pauses (§2.3). *Corrected 2026-11-09:* this bullet earlier
+    attached the pauses to the healthy-cluster quote.
   - It recommends fencing with the lock key's revision.
-  - It found a lock-after-lease-loss bug (#11456, fixed).
+  - It found a lock-after-lease-loss bug (#11456), fixed in v3.5.0 and not
+    in 3.4 (§2.3).
+  - Its faults included leader-targeted crashes and pauses, partitions,
+    clock skew and membership changes, but its checks were for mutual
+    exclusion, not for P2 or P3, so it says nothing about the failover
+    windows of §3.
+- **Jepsen** (jetcd 0.8.2, 2024) tested jetcd against etcd, with `kill -9`
+  as the only fault, using list-append and read-write register workloads.
+  It found the retry defect of §5.4 and no server anomaly; it did not test
+  leases. Its harness at `fbe693e` defaults to etcd 3.5.15; the report does
+  not name the version.
 
 ## 9. Where these conclusions could fail
 
@@ -1406,6 +1636,7 @@ Verified at `master` on 2026-10-31, except where tagged `v1.37.2`.
 | P2 "by default" | The cluster enables `LeaseCheckpoint` | Even then it holds for leases with TTL ≤ 5 min, and for all leases while leader changes come faster than the checkpoint interval |
 | Kubernetes (§7) | Kubernetes uses etcd leases for more than TTL'd resources | A component that calls `KeepAlive` against the Kubernetes etcd would be exposed to §3 |
 | jetcd consequence (§5.3) | Applications follow jetcd's de facto contract (only `NOT_FOUND` and `onCompleted` are terminal) | Then the #22094-like end state does not arise |
+| jetcd `Lock` retry race (§5.4) | The member always ends the first attempt's handler, and its cleanup commits, before the retry's acquisition reaches the cluster | Plausible for a reset connection, which the member notices at once, if the cleanup commits within jetcd's 500 ms backoff. Not for a silently dead connection, which the member notices only through a keepalive ping after 2 h idle (`server/embed/config.go:70`) |
 
 ## 10. Open questions and next steps
 
@@ -1516,11 +1747,19 @@ parts (§4.3):
   (#22081, #22094) and jetcd's `onError` contract can leave a lease renewed
   forever after the application believes it is gone. Both clients' deadlines
   are optimistic. — **High** (code).
+- **Retries are fixed where Jepsen found them, not everywhere.** jetcd no
+  longer retries writes by default (0.8.5). Both clients still retry lease
+  grant and revoke, and jetcd retries `Lock`, which opens a narrow race
+  with the first attempt's cleanup (§5.4). — **High** (code); **Low** for
+  the race's likelihood.
 - **Maintenance signals are weak for lease timing.** — **High** for the
   facts; the interpretation is my inference.
   - The failover bug took about three years to fix after its first
     reproduction, and a stale bot closed it once.
   - The structural fix was not adopted.
+  - Both lease redesign trackers were closed by the project's stale bot,
+    whose exemption for tracked issues was not being applied, and neither
+    has been reopened (§3.7).
   - Checkpointing has been experimental or Alpha since v3.4.0 (2019).
   - The main correctness harness does not exercise expiry or keepalive.
 
@@ -1544,6 +1783,13 @@ These recommendations follow from the code facts above; none was tested. —
   - Treat any `onError` other than `NOT_FOUND` as transient.
   - When giving up a lease, call `close()` on the keep-alive and revoke the
     lease explicitly (§5.3).
+  - Use jetcd 0.8.5 or later, and do not set `withAutoRetry()` on writes
+    that are not safe to repeat (§5.4).
+  - After a failed or retried `Lock`, revoke the lease or prove ownership
+    with a fenced write before acting (§5.4).
+- **All client users.** Treat a write that fails with a timeout or
+  `UNAVAILABLE` as "outcome unknown", and a `NOT_FOUND` from revoke as
+  success (§5.4).
 - **Operators.**
   - Do not rely on lease TTL for bounded cleanup under leader churn.
   - Leave `LeaseCheckpoint` off, unless retaining long leases matters more
@@ -1576,6 +1822,8 @@ would lower them.
 - **Legend.**
   - † = row added on 2026-11-01, with its state checked that day through
     the GitHub API.
+  - ‡ = row added on 2026-11-09 from the Jepsen reports, with its state
+    checked that day.
   - "Read": "body" means I read the issue text (and comments where noted);
     otherwise, title only.
 
@@ -1583,12 +1831,12 @@ would lower them.
 |---|---|---|---|---|---|
 | [#15247](https://github.com/etcd-io/etcd/issues/15247) | All leases revoked when leader stuck (fdatasync/CPU) | closed, fixed (#16822) | P3 safety | **Yes** | body + 44 comments |
 | [#12528](https://github.com/etcd-io/etcd/issues/12528) | Old leader still revokes lease after stepping down (high CPU) | closed by stale bot, unfixed then | P3 safety | **Yes** | body |
-| [#13915](https://github.com/etcd-io/etcd/issues/13915) | Make leases linearizable (excluding TTL) | closed not planned | P4 / design | Yes (proxying to leader outside Raft) | body + comments |
+| [#13915](https://github.com/etcd-io/etcd/issues/13915) | Make leases linearizable (excluding TTL) | closed not planned by the stale bot (twice; reopened once by a maintainer; exemption ignored, §3.7) | P4 / design | Yes (proxying to leader outside Raft) | body + comments |
 | [#9888](https://github.com/etcd-io/etcd/issues/9888) | Leases may be auto-renewed indefinitely due to leader elections | closed (checkpointing) | P2 | **Yes** | body |
 | [#9395](https://github.com/etcd-io/etcd/issues/9395) | TTL resetting on leader elections or restart, undocumented | closed | P2 | **Yes** | body |
 | [#17132](https://github.com/etcd-io/etcd/issues/17132) | Checkpointing not working as expected (3rd leader change) | closed (needs persist flag) | P2 | **Yes** | body + comments |
 | [#20273](https://github.com/etcd-io/etcd/issues/20273) | Lease not expired when node restarts | closed not planned | P2 (by design) | Restart | body |
-| [#13776](https://github.com/etcd-io/etcd/issues/13776) | Track stabilization of lease checkpointing | closed not planned | P2 process | Yes | body |
+| [#13776](https://github.com/etcd-io/etcd/issues/13776) | Track stabilization of lease checkpointing | closed not planned by the stale bot (exemption ignored, §3.7) | P2 process | Yes | body |
 | [#22649](https://github.com/etcd-io/etcd/issues/22649) | Checkpointer discards raftRequest error | **open** | P3 (gate on) | Yes (likely during leader change) | body |
 | [#18069](https://github.com/etcd-io/etcd/issues/18069) | +20 % leader CPU from leadership check in renew | closed (#18428) | perf vs P3 | Yes (weakened safeguard) | body + PR review |
 | [#18100](https://github.com/etcd-io/etcd/issues/18100) | Make linearizable renew configurable (apply stalls block keepalives) | closed → `FastLeaseKeepAlive` (Beta, default on in v3.7, `etcd_features.go:97`) | perf / availability | Indirect | body |
@@ -1613,6 +1861,9 @@ would lower them.
 | † [#22382](https://github.com/etcd-io/etcd/issues/22382) | `concurrency.ResumeMutex` | **open** | feature request | No | title |
 | † [#22083](https://github.com/etcd-io/etcd/issues/22083), [#22084](https://github.com/etcd-io/etcd/issues/22084), [#22417](https://github.com/etcd-io/etcd/issues/22417) | `client/v3/leasing` (client-side lease-backed cache): protocol keys deletable, data race, stale count | **open** | cache, not KV leases | No | titles |
 | † [#22209](https://github.com/etcd-io/etcd/issues/22209) | `keys_only` range no longer returns the `lease` field (v3.7 regression) | **open** | API metadata | No | title |
+| ‡ [#11456](https://github.com/etcd-io/etcd/issues/11456) | Locks return without checking whether the lease is still held (Jepsen) | closed, fixed by `b14c7cd44` (v3.5.0; not in 3.4) | P5 client recipe | No | body + fix commit (§2.3) |
+| ‡ [#11457](https://github.com/etcd-io/etcd/issues/11457) | Document that locks aren't really locks (Jepsen) | closed by PR #11490 (2020-03-05) | P5 docs | No | timeline; current docs read (§2.3) |
+| ‡ [#18424](https://github.com/etcd-io/etcd/issues/18424) | Go and Java clients' retries may break `Serializable` (after Jepsen jetcd 0.8.2) | closed *not planned* by the stale bot (2025-06-01) | client retries | No | body + comments (§5.4) |
 
 Out of scope but easily confused:
 [#10082](https://github.com/etcd-io/etcd/issues/10082) and
@@ -1636,16 +1887,21 @@ Most relevant first.
 - etcd [#13675](https://github.com/etcd-io/etcd/issues/13675) / PR [#13690](https://github.com/etcd-io/etcd/pull/13690) (v3.5.3): keepalive reported a just-granted lease as not found. Refined by `FastLeaseKeepAlive`, [#18100](https://github.com/etcd-io/etcd/issues/18100) / PR [#20589](https://github.com/etcd-io/etcd/pull/20589).
 
 **Linearizability and TTL reset (P2, P4)**
-- etcd [#13915](https://github.com/etcd-io/etcd/issues/13915): "Make leases linearizable (excluding TTL)"; closed *not planned* by the stale bot 2025-12-19.
+- etcd [#13915](https://github.com/etcd-io/etcd/issues/13915): "Make leases linearizable (excluding TTL)". Closed *not planned* by the stale bot 2025-09-11, reopened by a maintainer 2025-09-23, closed again by the bot 2025-12-19; its `stage/tracked` exemption was not being applied at either closure (§3.7).
 - etcd [#9888](https://github.com/etcd-io/etcd/issues/9888), [#9395](https://github.com/etcd-io/etcd/issues/9395), [#17132](https://github.com/etcd-io/etcd/issues/17132), [#20273](https://github.com/etcd-io/etcd/issues/20273): TTL reset on leader change or restart.
   - Checkpointing: [#9924](https://github.com/etcd-io/etcd/pull/9924), [#13508](https://github.com/etcd-io/etcd/pull/13508).
-  - Stabilization tracker [#13776](https://github.com/etcd-io/etcd/issues/13776), closed *not planned* 2025-09-30.
+  - Stabilization tracker [#13776](https://github.com/etcd-io/etcd/issues/13776), closed *not planned* by the stale bot 2025-09-30, while its `stage/tracked` and `help wanted` exemptions were not being applied (§3.7).
 
 **Clients**
 - etcd [#22081](https://github.com/etcd-io/etcd/issues/22081), [#22094](https://github.com/etcd-io/etcd/issues/22094) (both open): Go lease client `closeRequireLeader` bugs (§5.2). Fix PRs [#22087](https://github.com/etcd-io/etcd/pull/22087), [#22253](https://github.com/etcd-io/etcd/pull/22253), [#22291](https://github.com/etcd-io/etcd/pull/22291), all open.
 - etcd PR [#21122](https://github.com/etcd-io/etcd/pull/21122) (v3.7.0 only): keep-alive stream cancellation is no longer always reported as "no leader".
 - etcd PR [#5332](https://github.com/etcd-io/etcd/pull/5332) (v3.0.0) and commit `8024a0d15` (v3.2.0): origin of `WithRequireLeader` stream cancellation, and its lease-client support.
 - jetcd [#1322](https://github.com/etcd-io/jetcd/issues/1322) (commit `10b07f5`, jetcd 0.8.0) and [#1383](https://github.com/etcd-io/jetcd/issues/1383) (open): keep-alive error reporting (§5.3).
+- jetcd [#1444](https://github.com/etcd-io/jetcd/issues/1444) / PR [#1445](https://github.com/etcd-io/jetcd/pull/1445) (commit `05f92e0`, merged 2025-02-18, first in jetcd 0.8.5): no default retry of non-idempotent operations (§5.4). Earlier reports of the same defect: jetcd [#1072](https://github.com/etcd-io/jetcd/issues/1072) (stale-closed 2022), etcd [#14092](https://github.com/etcd-io/etcd/issues/14092) (closed 2022 as a jetcd issue), [#14890](https://github.com/etcd-io/etcd/issues/14890) (closed 2024-08-02), [#18424](https://github.com/etcd-io/etcd/issues/18424) (closed not planned 2025-06-01).
+
+**Locks (P5)**
+- etcd [#11456](https://github.com/etcd-io/etcd/issues/11456) (fix `b14c7cd44`, v3.5.0) and [#11457](https://github.com/etcd-io/etcd/issues/11457) / PR [#11490](https://github.com/etcd-io/etcd/pull/11490) (docs, 2020-03-05): from the Jepsen etcd 3.4.3 analysis (§2.3).
+- etcd [#19597](https://github.com/etcd-io/etcd/issues/19597), [#22082](https://github.com/etcd-io/etcd/issues/22082) (both open): lock recipe defects (Appendix A).
 
 **Performance and load**
 - etcd [#21735](https://github.com/etcd-io/etcd/issues/21735): root JWT signing per expired lease.
@@ -1657,7 +1913,9 @@ These are covered in §6 and Appendix A.
 
 **Kubernetes and external**
 - Kubernetes [#65497](https://github.com/kubernetes/kubernetes/issues/65497), [#110210](https://github.com/kubernetes/kubernetes/issues/110210) (open), [#96836](https://github.com/kubernetes/kubernetes/issues/96836), [#47532](https://github.com/kubernetes/kubernetes/issues/47532), PR [#64539](https://github.com/kubernetes/kubernetes/pull/64539), [#86812](https://github.com/kubernetes/kubernetes/issues/86812).
-- [Jepsen: etcd 3.4.3](https://jepsen.io/analyses/etcd-3.4.3) (2020-01-30).
+- [Jepsen: etcd 3.4.3](https://jepsen.io/analyses/etcd-3.4.3) (2020-01-30); test source `jepsen-io/etcd` @ `16149cb`.
+- [Jepsen: jetcd 0.8.2](https://jepsen.io/analyses/jetcd-0.8.2) (2024-08-08); harness `jepsen-io/etcd` @ `fbe693e`.
+- Background for the anomaly names in §5.4: Jepsen's [consistency models](https://jepsen.io/consistency). G1a (aborted read) and G1c (cyclic information flow) are Adya's phenomena, as cited by the jetcd report.
 
 ## Appendix C. Revision history
 
@@ -1670,6 +1928,8 @@ These are covered in §6 and Appendix A.
 | 2026-11-01 | Revised using the Codex and Antigravity lease analyses as leads (C.2). Two corrections of earlier text: (1) the client-side window had been called "normally milliseconds"; it is about 1 s plus reply delay, because of the 1-second deadline sweep (§5.1). (2) An earlier chat summary led with the point that the KV state is safe (P1). That made the answer read as more equivocal than the evidence warrants, since P3 is the property that matters. |
 | 2026-11-01 | Restructured for readability: Scope, Summary and Conclusions added; Direct answer and Summary merged; sections reordered. Content unchanged except one stale cross-reference: the §4.2 client-view row said "normally ms", contradicting the correction above. |
 | 2026-11-01 | §2.5 added after Antigravity disputed my rejection of its response-header finding. My rejection ("deliberate lower bound") holds only for successful renewals; see C.2. |
+| 2026-11-09 | **Jepsen pass**, at the user's request: the etcd 3.4.3 and jetcd 0.8.2 reports read in full, their issues traced, and their fixes checked at `v3.7.3` and `jetcd-0.8.7`. New: §2.3 "Jepsen's measurements", "#11456" and "Documentation"; §5.4 (automatic retries, including the lease grant/revoke and jetcd `Lock` consequences, inferred); key finding 12; a §9 row; §11.2, §11.3 bullets; Appendix A rows marked ‡; Appendix B entries. Corrected: the §8 Jepsen bullet attached process pauses to the healthy-cluster quote. No earlier finding or rating changed. Nothing run. |
+| 2026-11-09 | Context added to the closures of #13915 and #13776 (key finding 11, §2.1 P4, the §3.7 timeline and "Reading the timeline", §11.2, Appendices A and B): both were closed by the stale bot during the 2025-05-13 to 2026-01-13 window when its `stage/tracked` exemption was ignored, and #13915 had been reopened once by a maintainer. The earlier text could be read as maintainers declining the designs. Finding 11 and its High rating are unchanged: a tracked issue closed by the project's own process, and left closed, counts for an adopter the same as one declined. Checked through the GitHub API (labels, closers, timeline) and the workflow fix `55c5fabe5`. |
 
 **Old → new section numbers** (for references made before the
 restructuring):

@@ -282,3 +282,62 @@ recorded here (`AGENTS.md` §9, rule 1).
   One rename: `wal-replacement-agy.md:190` "MVCC Engine" became "State
   Machine". Claude Code checked tables, Chubby citations, Summary levels and
   the denylist, not the ratings.
+- 2026-11-08: New question, analyzed independently by all three tools:
+  should one build an etcd-compatible replacement from scratch, in C++ or
+  Rust, on ClickHouse's NuRaft fork and RocksDB, written mostly by coding
+  agents; and should it keep gRPC wire compatibility (A) or only
+  language-level client API compatibility (B)? Files:
+  `analysis/nuraft-rocksdb-rewrite-claude.md` (2026-11-08; written without
+  reading the Codex file), `-codex.md` (2026-11-08) and `-agy.md`
+  (2026-11-09). All three recommend A, and none reports building or running
+  anything. They disagree on language: Antigravity says C++20 (High),
+  Claude says Rust with a thin C++ shim (Moderate–Low), and Codex says
+  either, depending on the team. Their estimates for a production candidate
+  with the full or broad API differ by up to an order of magnitude:
+  Antigravity 14–22 engineer-months, Claude 30–60, Codex 80–160 (Low
+  confidence in Claude's and Codex's estimates; Antigravity gives Low to
+  Moderate for its schedule). Not reconciled. New read-only source clones,
+  not yet listed in `AGENTS.md` §4: `~/github/NuRaft` (ClickHouse/NuRaft
+  `master` `e937522`), `~/github/rocksdb` (meta/rocksdb tag `v11.13.2` =
+  `17b624b5c`), `~/github/jepsen-etcd` (jepsen-io/etcd `master` `b47cc40`).
+  No worktrees were created.
+- 2026-11-08 and 2026-11-09: Jepsen pass. All three tools extended their
+  `leases-`, `watchers-` and `etcd-issues-and-mitigations-` files with the
+  Jepsen reports on etcd 3.4.3 (2020) and jetcd 0.8.2 (2024), and checked
+  the state of their fixes at `v3.7.3` and `jetcd-0.8.7`.
+  - Codex (2026-11-08, `leases-codex.md` §5.6 and §A.4,
+    `watchers-codex.md` §1.6, §6.5 and §A.6): ownership checks and recovering
+    a lost write's outcome are separate problems; jetcd #1445 fixes KV
+    retries only; jetcd 0.8.7 stops renewing after a clean keepalive stream
+    end (fix #1628).
+  - Claude (2026-11-09, `leases-claude.md` §2.3, §5.4 and §8,
+    `watchers-claude.md` §2.5, brief LS8 and LS10): Jepsen measured about
+    18 % of acknowledged updates lost under unfenced locks and none under
+    lock-guarded transactions. Its watch test rotated each watch every
+    0–5 s and checked only after healing, so it could not see silent
+    watches. Lease and lock retries remain in jetcd 0.8.7; the lock retry
+    race is inferred (Low).
+  - Antigravity (2026-11-09, `leases-agy.md` §4.4–4.5, `watchers-agy.md`
+    §2.2.2 and §3.2): jetcd lease and lock retries after #1445; says
+    `Election.Campaign` lacks the post-wait ownership check that #11456
+    added to `Mutex.Lock`; revision-0 watch doc defects that remain. Its
+    `History:` lines now record this update, but not the edits of
+    2026-11-02 and 2026-11-03.
+  None of these edits reports running a build, test or benchmark.
+- 2026-11-09: Maintenance and governance review in the three
+  `etcd-issues-and-mitigations-` briefs: Claude §5 "Project scope and
+  maintenance capacity", Codex "Adoption risk: maintenance coverage and issue
+  resolution" and "Governance history and current responsibilities",
+  Antigravity §4 with three case studies. All three trace the handling of
+  Jepsen's reports (etcd #14092, jetcd #1072, etcd #14890, #18424): closed in
+  2024 as "inaccurate", then partly accepted once Jepsen published.
+- 2026-11-09: jetcd `jetcd-0.8.8` released: tag = `a2909b8`, GitHub
+  release 2026-11-09T06:40Z, Maven Central `<release>0.8.8</release>`
+  (checked by Claude Code). etcd is still at `v3.7.3`. The jetcd clone stays
+  at `jetcd-0.8.7` until the user confirms the move (`AGENTS.md` §4, step 2).
+  The Claude and Codex briefs say they do not analyze 0.8.8; the Antigravity
+  files cite both 0.8.7 and 0.8.8.
+- 2026-11-09: `analysis/INDEX.md` updated for the twelve files above, at
+  the user's request: three new rows, notes on nine rows, the new prefix,
+  and a paragraph on the Jepsen pass. A denylist scan of the working tree
+  (the publish script's `grep -i -F`, paper excluded) found nothing.
