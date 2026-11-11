@@ -1,6 +1,6 @@
 # Chubby perspectives: sessions, KeepAlives, and the etcd lease and watch issues (Claude)
 
-**History:** Written 2026-11-01. Revised 2026-11-02 after cross-checking two independent analyses (Appendix B), then reorganized for readability. Later on 2026-11-02, a caveat on etcd's watch delivery disclaimer was added to §6.1; it points to `etcd-issues-and-mitigations-claude.md` §3.
+**History:** Written 2026-11-01. Revised 2026-11-02 after cross-checking two independent analyses (Appendix B), then reorganized for readability. Later on 2026-11-02, a caveat on etcd's watch delivery disclaimer was added to §6.1; it points to `etcd-issues-and-mitigations-claude.md` §3. Corrected 2026-11-10 after an accuracy review: the upstream report #22714 was added to the lease failover rows (§1, §5), and the account of how #19091's first fix was closed was corrected (§8.2).
 
 **Versions analyzed:**
 
@@ -151,7 +151,7 @@ Per-issue verdicts are tabulated in §1.
 | Leader loss is terminal for flagged watches; mass watch teardown (Kubernetes #111116) | **Yes in the library** (jeopardy, then a grace period). Chubby's applications reproduced it by crashing on the fail-over event | Moderate | §6.2 |
 | Event loss across fail-over; restore, compaction and resume bugs | **No**: Chubby is lossy and has no history. The bugs are avoided by omission | High | §6.3 |
 | Slow watchers stalling writes (#22264) | **Inverted**: Chubby stalls writes by design, but for a bounded time | Moderate | §6.4 |
-| Lease failover safety, P3 (#12528, #15247 fixed; R1–R5 residual, unreproduced) | **No**. The paper relies on master leases and epochs here, and does not state how a deposed master's internal work is fenced | Moderate | §5.1 |
+| Lease failover safety, P3 (#12528, #15247 fixed; R1–R5 residual, of which R2 is reported reproduced upstream in #22714, 2026-11-06) | **No**. The paper relies on master leases and epochs here, and does not state how a deposed master's internal work is fenced | Moderate | §5.1 |
 | Safe renewal needs a quorum round; its cost led to a weaker check (#18069 → #18428, R1) | **No, not through sessions**: the master lease lets Chubby's master answer alone | Moderate | §5.4 |
 | No upper bound after leader change, P2 (#65497, #9888) | **No**; Chubby has the same rule. The P2/P3 *conflict* is avoided because Chubby has no data-expiry objects | High (paper) | §5.2 |
 | Checkpointing and #22649 | **Avoided by omission** (nothing to checkpoint) | Moderate | §5.2 |
@@ -318,7 +318,7 @@ Issue numbers and properties are from `leases-claude.md`; the section numbers in
 
 | # | etcd issue (leases-claude §) | Verdict | Chubby mechanism that matters | Confidence |
 |---|---|---|---|---|
-| L1 | P3 violated on failover: a stalled ex-leader revokes live leases or acknowledges unseen renewals (#12528, #15247, both fixed; #16822 is in v3.7.3). Residual windows R1–R5 are inferred from code; none reproduced (§3.4) | **Not prevented by sessions** | Master lease (a real-time bound on authority) and epochs (stale client calls rejected). The paper does not describe how a deposed master's own pending work is fenced. The etcd flaw: revocations commit as term-less commands (leases-claude §4.3). See §5.1 | Moderate |
+| L1 | P3 violated on failover: a stalled ex-leader revokes live leases or acknowledges unseen renewals (#12528, #15247, both fixed; #16822 is in v3.7.3). Residual windows R1–R5 are inferred from code; this project reproduced none, and upstream #22714 (2026-11-06, open) reports R2 reproduced on v3.7.2 (leases-claude §3.4) | **Not prevented by sessions** | Master lease (a real-time bound on authority) and epochs (stale client calls rejected). The paper does not describe how a deposed master's own pending work is fenced. The etcd flaw: revocations commit as term-less commands (leases-claude §4.3). See §5.1 | Moderate |
 | L2 | P2: no upper bound; every leader change resets each lease to TTL + ET (§1.3, §2.2) | **Shared** | Chubby extends leases to the maximum on fail-over and defers ephemeral deletion (N3). See §5.2 | High (paper and code) |
 | L3 | P2 vs P3 on one knob: sessions need P3, data expiry (Kubernetes Events) needs P2 (§2.2) | **Avoided by omission** | No data-expiry primitive: liveness-scoped objects need a live client (§3.4). See §5.2 | Moderate |
 | L4 | Checkpointing is Alpha, limited, and has #22649 (§1.4, §3.5) | **Avoided by omission** | Nothing to checkpoint. Chubby moved *away* from persisting sessions (Chubby §4.4, `:490`) | Moderate |
@@ -443,7 +443,7 @@ Issue numbers and failure states are from `watchers-claude.md`; the section numb
   - In jeopardy, it stops trusting its cache and blocks calls, but keeps the session and its handles.
   - It gives up only when the grace period ends (Chubby §2.8, `:265-279`). A normal election fits inside the 45 s grace period: the paper reports 4–6 s typically and up to 30 s (Chubby §2.2, `:94`).
 - **etcd's only freshness fail-safe has one stage.** `WithRequireLeader` turns "no leader" into a terminal `ErrNoLeader` (`watchers-claude.md` §6).
-  - Kubernetes #111116 shows the consequence at scale. After three election cycles without a leader, the API server's cacher terminated all its watchers, and re-creating them overloaded the API server.
+  - Kubernetes #111116 shows the consequence at scale. After three election cycles without a leader, the API server's cacher terminated all its watchers, and re-creating them overloaded the API server. Kubernetes fixed it in 2022 by making the cacher retry such errors for 30 s before it terminates its watchers (PR #111387; `staging/src/k8s.io/apiserver/pkg/storage/cacher/cacher.go:451-454 @ v1.37.2`; added 2026-11-10): a grace period added on the application side.
   - The issue asked for a retry window before termination, i.e. a grace period. It was closed as completed in 2022-07; I did not check how it was resolved.
 - **What an etcd equivalent would need.** A jeopardy-style state in the etcd client would mark caches stale **without** cancelling the watch, then resume from the last revision + 1 when a leader returns (B2). That combines Chubby's two stages with etcd's resumable history, which Chubby lacked (W8).
 - **Chubby's own experience shows the library cannot do it alone.** Its fail-over event told applications to rescan, and "many developers chose to crash their applications on receiving this event, thus decreasing the availability of their systems substantially" (Chubby §4.6, `:534`). That is the same failure as #111116, one layer up.
@@ -536,8 +536,8 @@ This is the "disconnected linearized read" the proxy flag advertises, and the op
 **Upstream history of (b)** (read 2026-11-02; found while checking another analysis's lead):
 - **Reported.** An outside contributor reported it as #19091 ("Client lease library does not check for expiration", 2024-12-19). The report included an integration test (a three-member cluster with one member cut off) that "sometimes fails, seeing the stale 'abc'".
 - **First fix.** PR #19092 explained the polling part of the cause: the `Done()` channel "is closed by a background loop that sleeps and periodically checks whether the lease is expired".
-- **Closed without review.** The stale bot closed both the issue and the PR on 2025-05-17, without maintainer review.
-- **Second fix.** #21589 (2026-04) was closed unmerged on 2026-06-28.
+- **Closed by the bot.** The stale bot closed both the issue and the PR on 2025-05-17. The issue had no human reply. The PR had one maintainer review comment, on naming (2024-12-21), and was never approved for testing (corrected 2026-11-10: this line said "without maintainer review").
+- **Second fix.** #21589 (2026-04) was closed unmerged by its author on 2026-06-28.
 - **Unchanged.** The code is the same at `v3.7.3` and on `origin/main` (`a2e3642bc`).
 - **What the fixes would leave open.** Both fixes compare the current time with the client's deadline. Since that deadline is receipt time + TTL (L6), they would close the 1 s polling gap but not the reply's flight time; B1 closes both.
 

@@ -10,7 +10,8 @@ rewrites.
 **Upstream references:** etcd [#13915](https://github.com/etcd-io/etcd/issues/13915),
 [#18428](https://github.com/etcd-io/etcd/pull/18428),
 [#20589](https://github.com/etcd-io/etcd/pull/20589),
-[#22649](https://github.com/etcd-io/etcd/issues/22649);
+[#22649](https://github.com/etcd-io/etcd/issues/22649),
+[#22714](https://github.com/etcd-io/etcd/issues/22714) (added 2026-11-11);
 Kubernetes [#65497](https://github.com/kubernetes/kubernetes/issues/65497).
 
 **Summary:**
@@ -18,6 +19,15 @@ Kubernetes [#65497](https://github.com/kubernetes/kubernetes/issues/65497).
   leader breaks the renewal guarantee. The ET extension (one election
   timeout) that a new leader adds when it takes over covers that case.
   — **Moderate**.
+  - **Qualified 2026-11-11.** The rejection holds for the mechanism
+    Antigravity gave: the extension covers the renewals that the cut-off
+    leader acknowledged, so the new leader does not revoke early on their
+    account. The headline does not hold in general. Upstream #22714 (filed
+    2026-11-06, open, not re-run by this project) reports that expiry
+    revocations queued on a partitioned leader are applied after it steps
+    down, and delete leases that clients are renewing on the new leader.
+    See [`leases-claude.md`](leases-claude.md) §3.4, R2. — **High**
+    (mechanism, from code); **Moderate** (the reported loss rates).
 - The other rejections are an over-read of Kubernetes design history and
   four factual errors.
 - One rejection was withdrawn in part after Antigravity's reply. The
@@ -39,7 +49,7 @@ The analysis that adopted the rest is
 
 | Claim | Why rejected | In the rewrite? |
 |---|---|---|
-| **A partitioned leader breaks P3.** `isActive()` keeps returning true, so a deposed leader's acknowledged renewals are lost and the new leader revokes early (High confidence). | The mechanism is right, the consequence is not. Per raft `v3.7.0`, the isolated leader steps down by partition + 2·ET (`raft.go:862-880`, `:1281-1292`). Followers cannot elect before about partition + ET − 1 tick (`:850-859`, `:1103`, `:2049-2055`). `Promote` adds ET + TTL after that. So every acknowledgement the old leader gave is covered to within about one tick (100 ms). The real exposure is with checkpointing on, through #22649. | **Corrected.** The rewrite now concludes that uncheckpointed leases survive, and moves the violation to #22649. |
+| **A partitioned leader breaks P3.** `isActive()` keeps returning true, so a deposed leader's acknowledged renewals are lost and the new leader revokes early (High confidence). | The mechanism is right, the consequence is not. Per raft `v3.7.0`, the isolated leader steps down by partition + 2·ET (`raft.go:862-880`, `:1281-1292`). Followers cannot elect before about partition + ET − 1 tick (`:850-859`, `:1103`, `:2049-2055`). `Promote` adds ET + TTL after that. So every acknowledgement the old leader gave is covered to within about one tick (100 ms). The real exposure is with checkpointing on, through #22649. **Qualified 2026-11-11:** this covers acknowledged renewals only. A partitioned leader can still break P3 by a different mechanism, its queued expiry revocations when more than 16 leases expire in one batch (`leases-claude.md` §3.4, R2; upstream #22714). | **Corrected.** The rewrite now concludes that uncheckpointed leases survive, and moves the violation to #22649. |
 | **Kubernetes "abandoned"/"refused" native etcd leases, the "clearest production verdict"** on them. | Kubernetes components reach state only through the API server, so coordination had to be an API object. That is architecture, not a verdict on etcd leases. | Phrasing removed. |
 | **Keep-alive response headers carry the follower's revision, a linearizability bug** ("Follower-Stamped" header). | **Rejection withdrawn in part; see "Reconsidered" below.** | Still present, narrowed to the negative-response case. |
 | **`FastLeaseKeepAlive` breaks lease linearizability**, by renewing a lease whose revoke is committed but not applied. | Narrowed, not rejected. PR #20589 states this trade-off and accepts it. It cannot break P3: the revoke is either explicit (excluded) or expiry-driven, and `Renew` already refuses expired leases (`lessor.go:415-430`). What remains is a narrow real-time-order case: the revoke is acknowledged by a member that applied it before the leader did. | — |

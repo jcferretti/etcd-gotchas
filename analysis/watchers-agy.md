@@ -1,7 +1,7 @@
 # Watchers: Raft Bypass, Leader Failover, API Promises, and Client/Server Failure States
 
 - **History:** revised 2026-11-01 for exposition clarity and cross-validated against `etcd v3.7.3` and `jetcd 0.8.7`; updated 2026-11-09 with findings from the Jepsen [`etcd 3.4.3`](https://jepsen.io/analyses/etcd-3.4.3) and [`jetcd 0.8.2`](https://jepsen.io/analyses/jetcd-0.8.2) analyses and associated upstream fixes through `etcd v3.7.3` and `jetcd-0.8.7` / `jetcd-0.8.8`
-- **Versions analyzed:** etcd `v3.7.3` (`0a173d0410a9`); jetcd `jetcd-0.8.7` (`23b61f1499a5`, plus upstream tag `jetcd-0.8.8` = `a2909b821` / `origin/main` checked for post-`0.8.7` diffs); raft `go.etcd.io/raft/v3` `v3.7.0`; selected Kubernetes `v1.37.2` storage/cacher files; selected upstream `main` commits cited explicitly where relevant
+- **Versions analyzed:** etcd `v3.7.3` (`0a173d0410a9`, plus upstream `origin/release-3.7` = `8e2ce34ca` and `origin/main` = `6974f5223` checked for post-`v3.7.3` changes); jetcd `jetcd-0.8.7` (`23b61f1499a5`, plus upstream tag `jetcd-0.8.8` = `a2909b838` / `origin/main` checked for post-`0.8.7` diffs); raft `go.etcd.io/raft/v3` `v3.7.0`; selected Kubernetes `v1.37.2` storage/cacher files; selected upstream `main` commits cited explicitly where relevant
 - **Upstream references:**
   - **External analyses:**
     [Jepsen etcd 3.4.3 analysis](https://jepsen.io/analyses/etcd-3.4.3) (2020-01-30),
@@ -18,18 +18,15 @@
     [#8980](https://github.com/etcd-io/etcd/issues/8980),
     [#9872](https://github.com/etcd-io/etcd/pull/9872),
     [#10289](https://github.com/etcd-io/etcd/issues/10289),
-    [#10422](https://github.com/etcd-io/etcd/issues/10422),
     [#10681](https://github.com/etcd-io/etcd/issues/10681),
     [#10819](https://github.com/etcd-io/etcd/issues/10819),
-    [#11457](https://github.com/etcd-io/etcd/issues/11457) (PR [#11490](https://github.com/etcd-io/etcd/pull/11490) / `3898452b5`, `e0ff5ca31`),
+    [#11474](https://github.com/etcd-io/etcd/pull/11474) (`23810ea28`),
     [#11496](https://github.com/etcd-io/etcd/issues/11496) (PR [#11559](https://github.com/etcd-io/etcd/pull/11559) / `342c2464a`),
     [#12022](https://github.com/etcd-io/etcd/issues/12022),
     [#12254](https://github.com/etcd-io/etcd/issues/12254),
     [#12534](https://github.com/etcd-io/etcd/issues/12534),
-    [#12991](https://github.com/etcd-io/etcd/issues/12991),
     [#13822](https://github.com/etcd-io/etcd/issues/13822),
     [#14303](https://github.com/etcd-io/etcd/issues/14303),
-    [#14699](https://github.com/etcd-io/etcd/issues/14699),
     [#15220](https://github.com/etcd-io/etcd/issues/15220),
     [#15237](https://github.com/etcd-io/etcd/pull/15237),
     [#15271](https://github.com/etcd-io/etcd/issues/15271),
@@ -38,14 +35,12 @@
     [#15820](https://github.com/etcd-io/etcd/issues/15820),
     [#16839](https://github.com/etcd-io/etcd/issues/16839),
     [#17247](https://github.com/etcd-io/etcd/issues/17247),
-    [#17475](https://github.com/etcd-io/etcd/issues/17475),
-    [#17507](https://github.com/etcd-io/etcd/issues/17507),
-    [#17508](https://github.com/etcd-io/etcd/issues/17508),
+    [#17475](https://github.com/etcd-io/etcd/pull/17475),
+    [#17507](https://github.com/etcd-io/etcd/issues/17507) (PR [#17557](https://github.com/etcd-io/etcd/pull/17557) / `6103504d4`, PR [#17566](https://github.com/etcd-io/etcd/pull/17566) / `579b22cf3`),
     [#17529](https://github.com/etcd-io/etcd/issues/17529),
     [#17555](https://github.com/etcd-io/etcd/pull/17555),
     [#17611](https://github.com/etcd-io/etcd/issues/17611),
     [#17622](https://github.com/etcd-io/etcd/pull/17622),
-    [#17791](https://github.com/etcd-io/etcd/issues/17791),
     [#18089](https://github.com/etcd-io/etcd/issues/18089),
     [#18274](https://github.com/etcd-io/etcd/pull/18274),
     [#18879](https://github.com/etcd-io/etcd/issues/18879),
@@ -69,6 +64,7 @@
     [#22264](https://github.com/etcd-io/etcd/issues/22264),
     [#22268](https://github.com/etcd-io/etcd/issues/22268),
     [#22294](https://github.com/etcd-io/etcd/issues/22294),
+    [#22596](https://github.com/etcd-io/etcd/pull/22596) (`afeaa624d`),
     [#22614](https://github.com/etcd-io/etcd/issues/22614),
     [#22635](https://github.com/etcd-io/etcd/issues/22635),
     [#22673](https://github.com/etcd-io/etcd/issues/22673)
@@ -83,8 +79,8 @@
     [#1444](https://github.com/etcd-io/jetcd/issues/1444) (PR [#1445](https://github.com/etcd-io/jetcd/pull/1445)),
     [#1616](https://github.com/etcd-io/jetcd/issues/1616),
     [#1617](https://github.com/etcd-io/jetcd/pull/1617) (`dc4fc009c`, in `jetcd-0.8.8`),
-    [#1631](https://github.com/etcd-io/jetcd/pull/1631) (`b4ccc3dea`, in `jetcd-0.8.8`),
-    commit `525794a7c` (in `jetcd-0.8.8`)
+    [#1631](https://github.com/etcd-io/jetcd/issues/1631) (PR [#1632](https://github.com/etcd-io/jetcd/pull/1632), `b4ccc3dea`, in `jetcd-0.8.8`),
+    commit `525794a7c` (in `jetcd-0.8.7`)
   - **Kubernetes issues & KEPs:**
     [kubernetes/kubernetes#59848](https://github.com/kubernetes/kubernetes/issues/59848),
     [kubernetes/kubernetes#76624](https://github.com/kubernetes/kubernetes/issues/76624),
@@ -93,7 +89,7 @@
     [kubernetes/kubernetes#111116](https://github.com/kubernetes/kubernetes/issues/111116),
     [kubernetes/kubernetes#123072](https://github.com/kubernetes/kubernetes/issues/123072),
     [kubernetes/kubernetes#123448](https://github.com/kubernetes/kubernetes/issues/123448),
-    [kubernetes/kubernetes#123513](https://github.com/kubernetes/kubernetes/issues/123513),
+    [kubernetes/kubernetes#123513](https://github.com/kubernetes/kubernetes/pull/123513),
     [KEP-2340 (Consistent Reads from Cache)](https://github.com/kubernetes/enhancements/tree/master/keps/sig-api-machinery/2340-Consistent-reads-from-cache)
 
 ---
@@ -115,17 +111,17 @@ A common architectural suspicion is that etcd Watch, like etcd Lease renewal, by
 
 This split creates two structural categories of production failures:
 - **Contract Gaps (Silent Staleness in a Quorum-Healthy Cluster):** Etcd's specification guarantees ordering and completeness of delivered events (*Ordered, Unique, Atomic, Reliable, Resumable, Bookmarkable*), but disclaims bounded delivery time (`etcd-io/website` `content/en/docs/v3.7/learning/api_guarantees.md`: *"there is no limit and events in unhealthy clusters might never arrive"*). While that doc phrases the disclaimer as *"unhealthy clusters"*, the critical failure occurs when **the cluster HAS a healthy majority quorum and is committing writes normally**: by default, a watch connected to a single partitioned follower or deposed leader (1 of 3 nodes) hangs silently forever while receiving `ProgressNotify` messages with the isolated node's frozen revision. Opting into `WithRequireLeader` does not solve this cleanly: it fails across nine distinct client, proxy, and server code paths—including destroying the client's watch channel instead of failing over to the surviving quorum, discarding the internal resumption revision on `startRev == 0` watches, and being completely ignored by `grpcproxy`.
-- **Direct Contract Violations (Event Loss, Contamination, and Deadlocks):** Because watch continuity across failovers depends entirely on the client and server maintaining a consistent revision cursor, subtle races and state-machine bugs cause silent event loss or duplication. Most critically, Java `jetcd` (`0.8.7`) overwrites its resumption cursor with the server's tip revision (`Header.Revision`) upon receiving the initial `Created` message, silently dropping all historical events in `[startRev, serverRev - 1]` if the stream reconnects before catch-up completes. On the server side, `etcd v3.7.3` contains open bugs that suppress `ProgressNotify` cluster-wide whenever any single watcher is unsynced (`#20242`), leak or cross-contaminate events from canceled watches (`#22673`), leak compacted watchers when $\ge 512$ watchers are unsynced (`#22294`), scan unbounded `bbolt` history under the exclusive lock blocking Raft apply (`#22264`), and actively migrate healthy watchers onto dead broadcasts in `grpcproxy` (`#21813`).
+- **Direct Contract Violations (Event Loss, Contamination, and Deadlocks):** Because watch continuity across failovers depends entirely on the client and server maintaining a consistent revision cursor, subtle races and state-machine bugs cause silent event loss or duplication. Most critically, Java `jetcd` (`0.8.7`) overwrites its resumption cursor with the server's tip revision (`Header.Revision`) upon receiving the initial `Created` message, silently dropping all historical events in `[startRev, serverRev - 1]` if the stream reconnects before catch-up completes. On the server side, `etcd v3.7.3` contains unfixed defects (several with GitHub issues closed as stale or `NOT_PLANNED` without a code fix) that suppress on-demand `WatchProgressRequest` (`RequestProgress`) across a shared gRPC `Watch` stream whenever any watcher on that stream is unsynced or awaiting a future revision (`#20242`), leak or cross-contaminate events from canceled watches (`#22673`), leak compacted watchers when $\ge 512$ watchers are unsynced (`#22294`), scan unbounded `bbolt` history under the exclusive lock blocking Raft apply (`#22264`), and actively migrate healthy watchers onto dead broadcasts in `grpcproxy` (`#21813`).
 
 ### Summary of Claims
 
-1. **[High confidence — Verified in code & docs]** **Watched key-value mutations go through Raft, but Watch stream operations (`WatchCreateRequest`, `WatchProgressRequest`, `ProgressNotify`, and stream liveness) bypass Raft and linearizable `ReadIndex`—creating a direct conceptual contradiction between etcd's claim of "eventual consistency for Watch" (`tests/robustness/README.md:102, 111`) and its disclaimer that events "might never arrive" (`api_guarantees.md:38`), even when the cluster maintains a healthy quorum.**
+1. **[High confidence — Verified in code & docs]** **Watched key-value mutations go through Raft, but Watch stream operations (`WatchCreateRequest`, `WatchProgressRequest`, `ProgressNotify`, and stream liveness) bypass Raft and linearizable `ReadIndex`—creating a direct conceptual contradiction between etcd's claim of "eventual consistency for Watch" (`tests/robustness/README.md:102, 111`) and its disclaimer that events "might never arrive" (`api_guarantees.md:37`), even when the cluster maintains a healthy quorum.**
    Every watched write is committed via Raft and applied deterministically to each replica's local MVCC `bbolt` store. However, because any replica can serve a watch stream from its unsynchronized local MVCC state without `ReadIndex`, a watch connected to a single partitioned or apply-stalled member in a quorum-healthy cluster can go permanently silent without notifying the client. In distributed systems theory (and etcd's own definition at `tests/robustness/README.md:102`), **eventual consistency** requires that components *"converge to the same view eventually"* (a liveness guarantee). A watch stream whose events *"might never arrive"* while the cluster has quorum provides only **prefix safety** (if events arrive, they are ordered and gap-free), not eventual consistency—negating the core utility of a push-based watch primitive and forcing production clients to bolt on periodic polling (linearizable `KV.Get` `ReadIndex` checks or scheduled watch restarts) to guarantee liveness.
-   - *Evidence:* `server/storage/mvcc/watchable_store_txn.go:22-47`, `server/etcdserver/api/v3rpc/watch.go:340-400, 558-570`, `server/storage/mvcc/watchable_store.go:118-167, 507-540`, `tests/robustness/README.md:100-111`, `client/v3/watch.go:78-84 @ v3.7.3`; `etcd-io/website` `content/en/docs/v3.7/learning/api_guarantees.md:36-38`, `design-client.md:48, 80, 106, 136`; `kubernetes/kubernetes#59848`.
+   - *Evidence:* `server/storage/mvcc/watchable_store_txn.go:22-47`, `server/etcdserver/api/v3rpc/watch.go:340-400, 558-570`, `server/storage/mvcc/watchable_store.go:118-167, 507-540`, `tests/robustness/README.md:100-111`, `client/v3/watch.go:78-84 @ v3.7.3`; `etcd-io/website` `content/en/docs/v3.7/learning/api_guarantees.md:35-37`, `design-client.md:48, 80, 106, 136`; `kubernetes/kubernetes#59848`.
    - *Condition under which this claim fails:* None for `v3.7.3`; verified directly in server source and specification docs.
 
 2. **[High confidence — Verified in code & issues]** **`WithRequireLeader` is off by default and, when enabled, fails to preserve Watch continuity and liveness across nine distinct client, proxy, and server paths.**
-   Without `WithRequireLeader`, a watch on a partitioned member never closes and continues receiving `ProgressNotify` at the isolated node's frozen revision (`#17611`). With `WithRequireLeader`, `monitorLeader` cancels existing streams after 3 election timeouts with `s.Leader() == raft.None` (~3–5 s under default settings), but exposes nine verified failure modes (detailed in §3.1):
+   Without `WithRequireLeader`, a watch on a partitioned member never closes and continues receiving `ProgressNotify` at the isolated node's frozen revision (`#8673`, `#8980`, `kubernetes/kubernetes#89488`). With `WithRequireLeader`, `monitorLeader` cancels existing streams after 3 election timeouts with `s.Leader() == raft.None` (~3–5 s under default settings), but exposes nine verified failure modes (detailed in §3.1):
    1. *Terminal watch destruction instead of failover* (`clientv3` and `jetcd` treat `ErrNoLeader` as fatal rather than failing over to the surviving quorum).
    2. *Silent loss of the internal resumption bookmark (`ws.initReq.rev`)* on `startRev == 0` watches when `closeSubstream` emits `Header.Revision == 0`.
    3. *Pinned `READY` gRPC `SubConn` and ineffective retry loop* in `openWatchClient()` because `ErrGRPCNoLeader` arrives in HTTP/2 trailers rather than closing the TCP connection.
@@ -135,28 +131,28 @@ This split creates two structural categories of production failures:
    7. *Server and transport blind spots* during apply-loop stalls (`s.Leader() != raft.None`), process pauses (`DialKeepAliveTime == 0` in `clientv3`), or total client isolation.
    8. *Complete failure in `grpcproxy`*, which reads `metadata.FromOutgoingContext` instead of `FromIncomingContext` on server streams and places its internal `__lostleader` watch on a separate gRPC stream from data watches.
    9. *Zero grace period in `newStreamInterceptor`*, which immediately rejects reconnecting streams with `ErrGRPCNoLeader` if they land on a surviving member during a normal 1-second leader election.
-   - *Evidence:* `server/etcdserver/api/v3rpc/interceptor.go:239-258, 315-353`, `server/proxy/grpcproxy/watch.go:112`, `server/proxy/grpcproxy/leader.go:42-80`, `client/v3/watch.go:478-541, 667, 838-872, 1039-1062 @ v3.7.3`; `WatchImpl.java:354 @ jetcd-0.8.7`; `#8980`, `#12254`, `#12534`, `#17611`, `kubernetes/kubernetes#111116`.
+   - *Evidence:* `server/etcdserver/api/v3rpc/interceptor.go:239-258, 315-353`, `server/proxy/grpcproxy/watch.go:112`, `server/proxy/grpcproxy/leader.go:42-80`, `client/v3/watch.go:478-541, 667, 838-872, 1039-1062 @ v3.7.3`; `WatchImpl.java:354 @ jetcd-0.8.7`; `#8673`, `#8980`, `#12254`, `#12534`, `#17611`, `kubernetes/kubernetes#89488`, `kubernetes/kubernetes#111116`.
    - *Condition under which this claim fails:* None for `v3.7.3` / `jetcd-0.8.7`; each path is verified directly in source code.
 
 3. **[High confidence — Verified in code]** **Opening a watch at the "current" revision (`startRev == 0`) or disconnecting immediately after `Created` can either replay pre-existing events or silently drop committed events.**
    `watchableStore.watch()` binds `startRev == 0` to the replica's local `s.store.currentRev + 1` ($R_1 + 1$) without `ReadIndex`, and `serverWatchStream.recvLoop` subsequently reads `sws.watchStream.Rev()` ($R_2 \ge R_1$) outside the lock to populate `Created.Header.Revision`. If concurrent writes commit between those two reads ($R_2 > R_1$) and the stream disconnects after `Created`, `clientv3` resumes at `nextRev = R_2`, silently dropping events in $[R_1 + 1, R_2 - 1]$. Conversely, if no writes intervene ($R_2 == R_1$), `clientv3` sets `nextRev = R_1` without adding `+ 1` (mistakenly treating `start_revision` as exclusive), replaying revision $R_1$ on reconnect.
-   - *Evidence:* `server/storage/mvcc/watchable_store.go:141-147`, `server/etcdserver/api/v3rpc/watch.go:340, 358`, `client/v3/watch.go:849-860, 871`, `api/etcdserverpb/rpc.proto:784 @ v3.7.3`.
+   - *Evidence:* `server/storage/mvcc/watchable_store.go:139-148`, `server/etcdserver/api/v3rpc/watch.go:340, 358`, `client/v3/watch.go:849-860, 871`, `api/etcdserverpb/rpc.proto:784 @ v3.7.3`.
    - *Condition under which this claim fails:* Requires `startRev == 0` (no explicit `WithRev`) and a stream disconnect between the `Created` message and the first delivered event.
 
-4. **[High confidence — Verified in code & issues]** **Reconnecting a watch to a lagging follower (`startRev > s.store.currentRev`) and member-local recovery paths have repeatedly broken Watch safety guarantees, and the `v3.7.3` fix (`#20229`) introduces server-wide `ProgressNotify` starvation (`#20242`) and an `mvcc` lock-order inversion (`#22184`).**
-   Prior to `v3.7.0`, placing future-revision watches into `s.synced` caused lagging followers to emit stale `ProgressNotify` revisions that rewound `clientv3`'s `nextRev` cursor (`#20221`). Commit `973847aa2` (`#20229`, in `v3.7.3`) suppresses progress when `rev < w.startRev`, but checks server-wide `s.unsynced`, `s.synced`, and `s.victims` maps while holding `watchableStore.mu.RLock()` before acquiring `store.mu.RLock()`. This starves progress notifications across the entire server whenever any single watcher is catching up (`#20242`) and inverts the documented lock order (`#22184`). **Qualification verified in `v3.7.3`:** While the lock inversion in `progressIfSync()` is real at the `mvcc` layer, issue `#22184`'s specific production trigger (`createMergedSnapshotMessage` calling `s.KV().Commit()` concurrently with `Write()`) does not occur in `EtcdServer` at `v3.7.3` because `applyAll()` serializes `Restore`, `Write`, `Compact`, and `Commit` on the single `s.applySched` FIFO goroutine.
-   - *Evidence:* `server/storage/mvcc/watchable_store.go:59-60, 141, 374, 486, 515-539`, `server/etcdserver/server.go:972-993, 1062-1069, 2101-2105 @ v3.7.3`; `#8411`, `#15220`, `#15271`, `#17529`, `#18089`, `#19179`, `#19487`, `#20221`, `#20229`, `#20240`, `#20242`, `#22184`.
-   - *Condition under which this claim fails:* Triggering the `#22184` deadlock in `EtcdServer` requires a caller outside `s.applySched` to acquire `store.mu.Lock()` concurrently with `watchableStoreTxnWrite.End()` and `progressIfSync()`.
+4. **[High confidence — Verified in code & issues]** **Reconnecting a watch to a lagging follower (`startRev > s.store.currentRev`) and member-local recovery paths have repeatedly broken Watch safety guarantees, and the `v3.7.3` fix (`#20229`) introduces stream-wide `WatchProgressRequest` (`RequestProgress`) starvation on multiplexed gRPC streams (`#20242`) and an `mvcc` lock-order inversion (`#22184`).**
+   Prior to `v3.7.0`, placing future-revision watches into `s.synced` caused lagging followers to emit stale `ProgressNotify` revisions that rewound `clientv3`'s `nextRev` cursor (`#20221`). Commit `973847aa2` (`#20229`, in `v3.7.3`) suppresses progress when `rev < w.startRev` or `w` is not in `s.synced.watchers`, while holding `watchableStore.mu.RLock()` before acquiring `store.mu.RLock()`. Because `RequestProgressAll()` passes every watcher `ws.watchers` on that `watchStream` (and Go `clientv3` multiplexes all watches with matching context metadata onto a single gRPC stream), any single unsynced, victim, or future-revision watcher on a shared gRPC stream suppresses on-demand `WatchProgressRequest` across all synchronized watchers on that stream (`#20242`), and `progressIfSync()` inverts the documented lock order (`#22184`). **Qualification verified in `v3.7.3`:** While the lock inversion in `progressIfSync()` is real at the `mvcc` layer, issue `#22184`'s specific production trigger (`createMergedSnapshotMessage` calling `s.KV().Commit()` concurrently with `Write()`) does not occur in `EtcdServer` at `v3.7.3` because `applyAll()` serializes `Restore`, `Write`, `Compact`, and `Commit` on `(*EtcdServer).run()`'s single local `sched` (`schedule.NewFIFOScheduler`) goroutine.
+   - *Evidence:* `server/storage/mvcc/watchable_store.go:59-60, 141, 374, 486, 507-540`, `server/etcdserver/server.go:764, 845, 972-993, 1062-1069, 2101-2105 @ v3.7.3`; `#8411`, `#15220`, `#15271`, `#17529`, `#18089`, `#19179`, `#19487`, `#20221`, `#20229`, `#20240`, `#20242`, `#22184`.
+   - *Condition under which this claim fails:* Stream-wide `WatchProgressRequest` starvation (`#20242`) requires $\ge 2$ watchers sharing a gRPC `Watch` stream; triggering the `#22184` deadlock in `EtcdServer` requires a caller outside `(*EtcdServer).run()`'s `sched` FIFO to acquire `store.mu.Lock()` concurrently with `watchableStoreTxnWrite.End()` and `progressIfSync()`.
 
-5. **[High confidence — Verified in code & issues]** **Multiple open server, proxy, and protocol bugs in `etcd v3.7.3` cause silent event omission, cross-watch event contamination, stream deadlocks, or unbounded apply-loop stalls.**
+5. **[High confidence — Verified in code & issues]** **Multiple unfixed server, proxy, and protocol defects in `etcd v3.7.3` cause silent event omission, cross-watch event contamination, stream deadlocks, or unbounded apply-loop stalls.**
    Specifically: (a) `sendLoop` retains `pending[wid]` across watch cancellation, leaking events or flushing them onto a reused `WatchId` (`#22673`); (b) `WithPrevKV()` silently omits `PrevKv` when `ModRevision - 1` is compacted (`#10681`); (c) `watcherGroup.choose()` deletes compacted watchers from a temporary copy instead of `s.unsynced` when $\ge 512$ watchers are unsynced (`#22294`); (d) `syncWatchers()` scans unbounded `[minRev, curRev+1)` revisions under `watchableStore.mu.Lock()` while delivering at most 1,000 (`#22264`); (e) burst watch cancellations deadlock `clientv3` and `serverWatchStream` in a 4-way channel cycle (`#18879`, `#20716`); (f) `grpcproxy` resets `wb.nextrev = 1` on upstream cancel, drops the `Canceled` response, and actively coalesces healthy broadcasts onto the dead broadcast (`#21813`); (g) `etcd/cache` permanently wedges as not-ready after compaction resync (`#22614`); and (h) `etcdutl snapshot restore` defaults to `--bump-revision=0`, turning resumed watches into silent future watches (`#14303`).
-   - *Evidence:* `server/etcdserver/api/v3rpc/watch.go:42, 122, 383, 450-456, 470-477, 519, 534-553`, `server/storage/mvcc/watcher_group.go:28, 57-60, 226-269`, `server/storage/mvcc/watchable_store.go:346-414`, `server/proxy/grpcproxy/watch_broadcast.go:84`, `server/proxy/grpcproxy/watcher.go:107`, `server/proxy/grpcproxy/watch_broadcasts.go:67-79`, `cache/cache.go:349-369, 405-421`, `etcdutl/etcdutl/snapshot_command.go:83-84 @ v3.7.3`.
-   - *Condition under which this claim fails:* Each bug has an exact trigger condition documented in §4.1–§4.8.
+   - *Evidence:* `server/etcdserver/api/v3rpc/watch.go:124, 179, 251, 383, 443-457, 470-477, 519, 530-554`, `server/storage/mvcc/watcher_group.go:28, 57-60, 226-269`, `server/storage/mvcc/watchable_store.go:346-414`, `server/proxy/grpcproxy/watch_broadcast.go:84`, `server/proxy/grpcproxy/watcher.go:107`, `server/proxy/grpcproxy/watch_broadcasts.go:67-79`, `cache/cache.go:349-369, 405-421`, `etcdutl/etcdutl/snapshot_command.go:83-84 @ v3.7.3`.
+   - *Condition under which this claim fails:* Each defect has an exact trigger condition documented in §4.1–§4.8.
 
 6. **[High confidence — Verified in code]** **Java `jetcd` (`jetcd-0.8.7`) contains a critical revision-tracking bug in `WatchImpl.java` that silently drops all historical events `[startRev, serverCurrentRev - 1]` if a watch stream disconnects after receiving `Created`.**
    When a watch is opened at `startRevision = R` against a server at revision $H > R$, the server immediately sends `Created: true` with `Header.Revision = H` while queueing the watcher in `s.unsynced` to stream events $[R, H]$ asynchronously. Upon receiving `Created`, `jetcd` executes `revision = Math.max(revision, response.getHeader().getRevision())`, jumping `this.revision` from $R$ to $H$ before any historical events arrive. If the stream disconnects before catch-up completes, `jetcd` reconnects with `start_revision = H`, silently losing $[R, H - 1]$. Additionally, `jetcd` has an off-by-one bug on `ProgressNotify` (missing `+ 1`), abandons the watcher if `resume()` throws inside `reschedule()` (`jetcd#1227`), lacks fragmentation support, and tests resumption only at `startRev == 0` against `etcd v3.5.14`.
-   - *Evidence:* `jetcd-core/src/main/java/io/etcd/jetcd/impl/WatchImpl.java:179-181, 256-268, 293, 312, 357-368`, `WatchResumeTest.java:37-69`, `Etcd.java:31 @ jetcd-0.8.7`; commit `70be01a` (`jetcd#946`).
-   - *Condition under which this claim fails:* Historical event loss occurs whenever `startRevision < serverCurrentRev` and the gRPC stream disconnects after `processCreated` before all unsynced historical batches up to `serverCurrentRev` have been delivered.
+   - *Evidence:* `jetcd-core/src/main/java/io/etcd/jetcd/impl/WatchImpl.java:141, 164-168, 186-195, 256-272, 293, 312, 357-368`, `WatchResumeTest.java:37-69`, `Etcd.java:31 @ jetcd-0.8.7`; commit `70be01a` (`jetcd#946`).
+   - *Condition under which this claim fails:* Historical event loss occurs whenever `startRevision < serverCurrentRev` and the gRPC stream disconnects after `WatcherImpl.onNext`'s `Created` branch before all unsynced historical batches up to `serverCurrentRev` have been delivered.
 
 ---
 
@@ -175,32 +171,34 @@ Watch handles **write operations** differently:
 
 - **Code References (`v3.7.3`):**
   - Lease renewal comparison: `server/etcdserver/v3_server.go:489`
-  - Raft apply pipeline: `server/etcdserver/raft.go:218`, `server/etcdserver/server.go:843-845, 1945`
+  - Raft apply pipeline: `server/etcdserver/raft.go:218`, `server/etcdserver/server.go:764, 843-845, 1945`
   - Synchronous watch notification on write commit (`server/storage/mvcc/watchable_store_txn.go:22-47 @ v3.7.3`):
     ```go
     func (tw *watchableStoreTxnWrite) End() {
-        changes := tw.Changes()
-        if len(changes) == 0 {
-            tw.TxnWrite.End()
-            return
-        }
-        rev := tw.Rev() + 1
-        evs := make([]mvccpb.Event, len(changes))
-        for i, change := range changes {
-            evs[i].Kv = &changes[i]
-            if change.CreateRevision == 0 {
-                evs[i].Type = mvccpb.Event_DELETE
-                evs[i].Kv.ModRevision = rev
-            } else {
-                evs[i].Type = mvccpb.Event_PUT
-            }
-        }
-        // end write txn under watchable store lock so the updates are visible
-        // when multiplexing the event to all watchers
-        tw.s.mu.Lock()
-        tw.s.notify(rev, evs)
-        tw.TxnWrite.End()
-        tw.s.mu.Unlock()
+    	changes := tw.Changes()
+    	if len(changes) == 0 {
+    		tw.TxnWrite.End()
+    		return
+    	}
+
+    	rev := tw.Rev() + 1
+    	evs := make([]*mvccpb.Event, len(changes))
+    	for i, change := range changes {
+    		evs[i] = &mvccpb.Event{Kv: changes[i]}
+    		if change.CreateRevision == 0 {
+    			evs[i].Type = mvccpb.Event_DELETE
+    			evs[i].Kv.ModRevision = rev
+    		} else {
+    			evs[i].Type = mvccpb.Event_PUT
+    		}
+    	}
+
+    	// end write txn under watchable store lock so the updates are visible
+    	// when asynchronous event posting checks the current store revision
+    	tw.s.mu.Lock()
+    	tw.s.notify(rev, evs)
+    	tw.TxnWrite.End()
+    	tw.s.mu.Unlock()
     }
     ```
 
@@ -212,7 +210,7 @@ While data mutations go through Raft, **watch stream control operations complete
 |---|---|---|---|---|
 | **`WatchCreateRequest` (`startRev == 0`)** | `server/etcdserver/api/v3rpc/watch.go:340` $\to$ `watchable_store.go:118-167` | **No** (reads local `s.store.currentRev`) | **No** | Binds "current revision" to a potentially stale follower or partitioned ex-leader; unlocked `Created` header read (`watch.go:358`) races with concurrent commits (§3.2). |
 | **`WatchCreateRequest` (`startRev > 0`)** | `server/storage/mvcc/watchable_store.go:141-155` | **No** (compares `startRev` against local `currentRev`) | **No** | If `startRev > s.store.currentRev` (failover to a lagging follower), the watcher is placed in `s.synced` (`line 141`) even though the follower has not yet applied up to `startRev` (§3.3). |
-| **`WatchProgressRequest` (`RequestProgress`)** | `server/etcdserver/api/v3rpc/watch.go:395-400` $\to$ `watchable_store.go:507-540` | **No** (reads local `s.rev()` under `s.mu.RLock()`) | **No** | A partitioned member with no leader (`s.Leader() == raft.None`) replies with `ProgressNotify` at its frozen local revision (`#17611`); a lagging follower either regresses client revision (`< v3.7.0`, `#20221`) or suppresses progress server-wide (`v3.7.3`, `#20242`). |
+| **`WatchProgressRequest` (`RequestProgress`)** | `server/etcdserver/api/v3rpc/watch.go:395-400` $\to$ `watchable_store.go:507-540` | **No** (reads local `s.rev()` under `s.mu.RLock()`) | **No** | A partitioned member with no leader (`s.Leader() == raft.None`) replies with `ProgressNotify` at its frozen local revision (`#8673`, `#8980`); a lagging follower either regresses client revision (`< v3.7.0`, `#20221`) or suppresses `WatchProgressRequest` across all watchers multiplexed on that gRPC stream (`v3.7.3`, `#20242`). |
 | **Periodic `ProgressNotify` (`WithProgressNotify`)** | `server/etcdserver/api/v3rpc/watch.go:558-570` | **No** (reads local `s.rev()`) | **No** | Emits unfenced local revision every `progressReportInterval` (default 10m), convincing clients that a partitioned watch stream is healthy. |
 | **Stream Liveness on Partition / Leader Loss** | `server/etcdserver/api/v3rpc/interceptor.go:239-258, 315-353` | **No** (polls local `s.Leader() == raft.None`) | **Opt-in only** (`WithRequireLeader`) | Off by default (watcher hangs forever on partitioned node), broken in `grpcproxy` (`watch.go:112`), and when enabled on direct connections, aborts with `ErrGRPCNoLeader`, which `clientv3` and `jetcd` treat as a fatal error that destroys the watch (§3.1). |
 
@@ -230,14 +228,14 @@ Across its documentation, protobuf specification, client contract, and robustnes
 
 | # | Promise | Definition & Invariant | Specification & Validator References (`v3.7.3`) |
 |---|---|---|---|
-| **1** | **Ordered** | Events on a watch stream are delivered in strictly non-decreasing `ModRevision` order (`event[i].Kv.ModRevision <= event[i+1].Kv.ModRevision`). | `etcd-io/website` `content/en/docs/v3.7/learning/api_guarantees.md`; `tests/robustness/validate/watch.go:30-39, 167-170` |
-| **2** | **Unique** | An event for a given key at a given `ModRevision` is never delivered more than once on the same logical watch (unless split across fragments when `WithFragment()` is enabled). | `tests/robustness/validate/watch.go:229-239` |
-| **3** | **Atomic** | All watched events produced by the same revision (e.g., a multi-key `Txn` or `LeaseRevoke`) are delivered in the same `WatchResponse` unless `WithFragment()` is set. | `tests/robustness/validate/watch.go:171-173`; enforced by `eventBatch.add` at `server/storage/mvcc/watcher_group.go:53-60` |
-| **4** | **Reliable (No Gaps)** | A watch stream never drops matching events within the retained history window: if events at revisions $R_a$ and $R_c$ ($R_a < R_c$) are delivered, every matching event $R_b \in (R_a, R_c)$ must be delivered between them. | `tests/robustness/validate/watch.go:268-281` |
-| **5** | **Resumable** | After a stream breaks at revision $R$, opening a new watch with `WithRev(R + 1)` (`start_revision` is **inclusive**) delivers all matching events at revisions $\ge R + 1$ without gaps or duplicates, unless $R + 1$ has been compacted (which must explicitly cancel the watch with `CompactRevision > 0`). | `api/etcdserverpb/rpc.proto:784, 850-858`; `tests/robustness/validate/watch.go:30-39` |
-| **6** | **Bookmarkable (`ProgressNotify`)** | An empty progress response (`IsProgressNotify() == true`) with `Header.Revision = R` guarantees that all matching events with `ModRevision <= R` have already been delivered on the stream, and all subsequent events will have `ModRevision > R`. | `api/etcdserverpb/rpc.proto:424-429`; `tests/robustness/validate/watch.go:159-165, 255-267` |
-| **7** | **Metadata & Filter Accuracy** | `WithPrevKV()` populates `Event.PrevKv` from `ModRevision - 1` on non-create events (unless compacted, §4.5); filters (`WithFilterPut`, `WithFilterDelete`) and RBAC (`isWatchPermitted`) restrict delivery to authorized matching keys in `[Key, RangeEnd)`. | `api/etcdserverpb/rpc.proto:805-807`; `tests/robustness/validate/watch.go:205-227`; `server/etcdserver/api/v3rpc/watch.go:287-328` |
-| **8** | **Partition Detection & Error Delivery** | Wrapping a watch context with `WithRequireLeader` prevents a watch from staying stuck on a partitioned node by closing with `ErrNoLeader`; whenever any watch is canceled, the final message on `WatchChan` must have `Canceled: true` and `Err() != nil`. | `client/v3/watch.go:57-92` (specifically lines `67-70` and `78-83`) |
+| **1** | **Ordered** | Events on a watch stream are delivered in strictly non-decreasing `ModRevision` order (`event[i].Kv.ModRevision <= event[i+1].Kv.ModRevision`). | `etcd-io/website` `content/en/docs/v3.7/learning/api_guarantees.md`; `tests/robustness/validate/watch.go:32, 139-153` |
+| **2** | **Unique** | An event for a given key at a given `ModRevision` is never delivered more than once on the same logical watch (unless split across fragments when `WithFragment()` is enabled). | `tests/robustness/validate/watch.go:33, 155-178` |
+| **3** | **Atomic** | All watched events produced by the same revision (e.g., a multi-key `Txn` or `LeaseRevoke`) are delivered in the same `WatchResponse` unless `WithFragment()` is set. | `tests/robustness/validate/watch.go:34, 180-194`; enforced by `eventBatch.add` at `server/storage/mvcc/watcher_group.go:53-60` |
+| **4** | **Reliable (No Gaps)** | A watch stream never drops matching events within the retained history window: if events at revisions $R_a$ and $R_c$ ($R_a < R_c$) are delivered, every matching event $R_b \in (R_a, R_c)$ must be delivered between them. | `tests/robustness/validate/watch.go:35, 196-229` |
+| **5** | **Resumable** | After a stream breaks at revision $R$, opening a new watch with `WithRev(R + 1)` (`start_revision` is **inclusive**) delivers all matching events at revisions $\ge R + 1$ without gaps or duplicates, unless $R + 1$ has been compacted (which must explicitly cancel the watch with `CompactRevision > 0`). | `api/etcdserverpb/rpc.proto:784, 850-858`; `tests/robustness/validate/watch.go:36, 231-252` |
+| **6** | **Bookmarkable (`ProgressNotify`)** | An empty progress response (`IsProgressNotify() == true`) with `Header.Revision = R` guarantees that all matching events with `ModRevision <= R` have already been delivered on the stream, and all subsequent events will have `ModRevision > R`. | `api/etcdserverpb/rpc.proto:424-429`; `tests/robustness/validate/watch.go:31, 111-137` |
+| **7** | **Metadata & Filter Accuracy** | `WithPrevKV()` populates `Event.PrevKv` from `ModRevision - 1` on non-create events (`rpc.proto:806` documents that nothing is returned if compacted; §4.5); filters (`WithFilterPut`, `WithFilterDelete`) and RBAC (`isWatchPermitted`) restrict delivery to authorized matching keys in `[Key, RangeEnd)`. | `api/etcdserverpb/rpc.proto:805-807`; `tests/robustness/validate/watch.go:37-39, 97-109, 256-315`; `server/etcdserver/api/v3rpc/watch.go:237-247, 287-318` |
+| **8** | **Partition Detection & Error Delivery** | Wrapping a watch context with `WithRequireLeader` prevents a watch from staying stuck on a partitioned node by closing with `ErrNoLeader`; whenever any watch is canceled, the final message on `WatchChan` must have `Canceled: true` and `Err() != nil`. | `client/v3/watch.go:78-83, 108-111` |
 
 ### 2.2 What the Contract Disclaims—and Why Equating "Eventual Consistency" With "Might Never Arrive" Is a Conceptual Contradiction
 
@@ -245,8 +243,8 @@ While the eight promises above constrain the **sequence** of events delivered on
 
 > - *"Eventual Consistency: Components may temporarily see different data after an update **but converge to the same view eventually**."* (`tests/robustness/README.md:102 @ v3.7.3`)
 > - *"Etcd provides strict serializability for KV operations and **eventual consistency for Watch**."* (`tests/robustness/README.md:111 @ v3.7.3`)
-> - *"Calling KV API will take an immediate effect, while Watch API will return with some unbounded delay. In correctly working etcd cluster you should expect to see watch events to appear with 10ms delay after them happening. **However, there is no limit and events in unhealthy clusters might never arrive.**"* (`etcd-io/website` `content/en/docs/v3.7/learning/api_guarantees.md:36-38`)
-> - *"etcd does not ensure linearizability for watch operations. Users are expected to verify the revision of watch events to ensure correct ordering with other operations."* (`etcd-io/website` `content/en/docs/v3.7/learning/api_guarantees.md:115-116`)
+> - *"Calling KV API will take an immediate effect, while Watch API will return with some unbounded delay. In correctly working etcd cluster you should expect to see watch events to appear with 10ms delay after them happening. **However, there is no limit and events in unhealthy clusters might never arrive.**"* (`etcd-io/website` `content/en/docs/v3.7/learning/api_guarantees.md:35-37`)
+> - *"etcd does not ensure linearizability for watch operations. Users are expected to verify the revision of watch events to ensure correct ordering with other operations."* (`etcd-io/website` `content/en/docs/v3.7/learning/api_guarantees.md:114-115`)
 > - *"Liveness. Servers may fail or disconnect briefly. Clients should make progress in either way. Clients should never deadlock waiting for a server to come back from offline, unless configured to do so."* (`etcd-io/website` `content/en/docs/v3.7/learning/design-client.md:48`)
 > - *"The balancer does not understand node’s health status or cluster membership. So, it is possible that balancer gets stuck with one failed or partitioned node."* / *"Client-side keepalive ping still does not reason about network partitions. Streaming request may get stuck with a partitioned node."* (`etcd-io/website` `content/en/docs/v3.7/learning/design-client.md:80, 106, 136`, originally `Documentation/dev-guide/apispec/grpc/design-client.md`)
 > - *"In order to prevent a watch stream being stuck in a partitioned node, make sure to wrap context with 'WithRequireLeader'."* (`client/v3/watch.go:82-83 @ v3.7.3`)
@@ -255,31 +253,31 @@ While the eight promises above constrain the **sequence** of events delivered on
 
 There is a fundamental distributed-systems contradiction across these statements:
 
-1. **Eventual consistency is a *liveness* guarantee (`converge eventually`), not merely a safety property (verified in `tests/robustness/README.md:102, 111`, `tests/robustness/validate/watch.go:30-39 @ v3.7.3`, and `api_guarantees.md:38`):**
+1. **Eventual consistency is a *liveness* guarantee (`converge eventually`), not merely a safety property (verified in `tests/robustness/README.md:102, 111`, `tests/robustness/validate/watch.go:30-39 @ v3.7.3`, and `api_guarantees.md:37`):**
    By definition—including etcd's own definition in `tests/robustness/README.md:102 @ v3.7.3`—eventual consistency requires that if a replicated system remains operational (maintains a majority quorum) and a client remains connected to the system, every committed update **must eventually reach the client** so that all components converge to the same view.
    - A specification that guarantees *Ordered*, *Unique*, *Atomic*, and *Reliable* (no interior gaps between delivered events $R_a$ and $R_c$) while allowing the stream to stop delivering new events forever provides **monotonic prefix safety with zero liveness**. An empty or frozen stream vacuously satisfies every safety rule in `tests/robustness/validate/watch.go:30-39` while violating eventual convergence.
-   - Either the etcd documentation conflates *asynchrony* (no hard real-time bound $\Delta$, even though events eventually arrive) with *non-termination / permanent silence* ("might never arrive"), or `tests/robustness/README.md:102, 111` and `design-client.md:48` directly contradict `api_guarantees.md:38`.
+   - Either the etcd documentation conflates *asynchrony* (no hard real-time bound $\Delta$, even though events eventually arrive) with *non-termination / permanent silence* ("might never arrive"), or `tests/robustness/README.md:102, 111` and `design-client.md:48` directly contradict `api_guarantees.md:37`.
 
 2. **Why "unhealthy clusters" is a false excuse — events fail to arrive when the cluster *has* a healthy quorum:**
-   If *"unhealthy clusters"* in `api_guarantees.md:38` only meant a cluster that has lost quorum (e.g., 2 of 3 nodes failed), the statement would be trivial and uninteresting: a consensus cluster without quorum has failed and cannot make progress on any API. The critical flaw in etcd is that **watch events can fail to arrive forever in a cluster that *maintains a healthy majority quorum* and is actively committing writes**:
+   If *"unhealthy clusters"* in `api_guarantees.md:37` only meant a cluster that has lost quorum (e.g., 2 of 3 nodes failed), the statement would be trivial and uninteresting: a consensus cluster without quorum has failed and cannot make progress on any API. The critical flaw in etcd is that **watch events can fail to arrive forever in a cluster that *maintains a healthy majority quorum* and is actively committing writes**:
    - **Scenario A — 1-of-3 Minority Network Partition (Quorum Intact, Default Watch):** In a 3-node cluster $\{M_1, M_2, M_3\}$ where $M_1$ is partitioned from $\{M_2, M_3\}$ while the client $\leftrightarrow M_1$ TCP link stays up, $\{M_2, M_3\}$ form a healthy quorum and commit writes normally. For KV operations (`Put`, linearizable `Get`), the cluster masks the single-node fault ($f = 1$). For Watch, because stream operations bypass Raft and `ReadIndex` (`server/etcdserver/api/v3rpc/watch.go:340-400, 558-570 @ v3.7.3`) and `WithRequireLeader` is off by default (`server/etcdserver/api/v3rpc/interceptor.go:239-258 @ v3.7.3`), $M_1$ **never closes the watch stream** and continues replying to `RequestProgress` / `WithProgressNotify` with $M_1$'s frozen local revision.
    - **Scenario B — 1-of-3 Follower Apply-Loop Stall (Quorum Intact, Even *With* `WithRequireLeader`) (**Moderate confidence** on the multi-goroutine stall schedule inferred from code):** Even when the client enables `WithRequireLeader`, `monitorLeader` (`server/etcdserver/api/v3rpc/interceptor.go:315-354 @ v3.7.3`) only checks `s.Leader() == raft.None`. If follower $M_1$ still receives Raft heartbeats from leader $M_2$ (`s.Leader() != raft.None`), the cluster has quorum and $M_1$ knows the leader—**but** if $M_1$'s local `applyAll` goroutine is stalled (e.g., blocked on a `bbolt` commit/defrag or scanning 500k revisions under `watchableStore.mu.Lock()` in `#22264`, `server/storage/mvcc/watchable_store.go:346-414 @ v3.7.3`), $M_1$ never applies new entries and never cancels the watch stream.
    - **Scenario C — Dead Upstream Broadcast in `grpcproxy` (`#21813`, Quorum Intact) (**Moderate confidence** on encounter frequency):** When watching through `grpcproxy`, an upstream cancel resets `wb.nextrev = 1`, drops the `Canceled` response (`server/proxy/grpcproxy/watcher.go:107 @ v3.7.3`), and `coalesce()` (`server/proxy/grpcproxy/watch_broadcasts.go:67-79 @ v3.7.3`) actively migrates receivers from healthy broadcasts onto the dead broadcast while the cluster is 100% healthy.
 
-3. **Why this negates the core utility of Watch and forces clients back to polling (verified in Kubernetes `KEP-2340` `watch_progress.go` / `delegator.go:160-172` and `kubernetes/kubernetes#59848`):**
-   The entire reason to use a `Watch` subscription rather than polling `KV.Get` is so the client can rely on the server to push changes without periodic polling. Because any etcd watcher can silently stop delivering events even while the cluster maintains quorum—and because the client has no built-in way to know its watcher has entered this silent zombie state (`RequestProgress` itself reads unfenced local state and can be starved server-wide by `#20242`), **clients cannot rely on Watch alone for eventual consistency**. Instead, production clients are forced to implement **periodic polling or scheduled watch restarts**:
+3. **Why this negates the core utility of Watch and forces clients back to polling (verified in Kubernetes `KEP-2340` `cacher/progress/watch_progress.go` / `delegator.go:160-172` and `kubernetes/kubernetes#59848`):**
+   The entire reason to use a `Watch` subscription rather than polling `KV.Get` is so the client can rely on the server to push changes without periodic polling. Because any etcd watcher can silently stop delivering events even while the cluster maintains quorum—and because the client has no built-in way to know its watcher has entered this silent zombie state (`RequestProgress` itself reads unfenced local state and can be starved across shared gRPC streams by `#20242`), **clients cannot rely on Watch alone for eventual consistency**. Instead, production clients are forced to implement **periodic polling or scheduled watch restarts**:
    - Either polling a quorum-backed linearizable `KV.Get` (to force a Raft `ReadIndex`, compare the cluster's true revision against the watcher's local revision, and bypass or restart the watch when it lags—as Kubernetes had to engineer in `KEP-2340` `ConditionalProgressRequester` + `delegator.go:160-172`), or
    - Periodically tearing down and restarting watchers / re-listing on a fixed schedule to escape silent zombie streams (without which stale watch caches cause production split-brain bugs such as `kubernetes/kubernetes#59848` / `etcd#8673`).
 
 #### 2.2.2 Historical Context from the Jepsen `etcd 3.4.3` Analysis: Consistency Terminology and Why Jepsen's Watch Workload Did Not Hit Silent Watch Hangs
 
 In its [analysis of `etcd 3.4.3`](https://jepsen.io/analyses/etcd-3.4.3) (`2020-01-30`), Jepsen evaluated both etcd's consistency documentation and its Watch behavior under faults:
-1. **Correction of `api_guarantees.md` Consistency Definitions (§1.1, §4, [#11457](https://github.com/etcd-io/etcd/issues/11457), PR [#11490](https://github.com/etcd-io/etcd/pull/11490)):**
-   Jepsen noted that etcd's pre-2020 `Documentation/learning/api_guarantees.md` misstated distributed-systems consistency guarantees—claiming that etcd ensured *"sequential consistency, the strongest consistency guarantee available"* and defining linearizability in terms of a *"loosely synchronized global clock"*. Following [#11457](https://github.com/etcd-io/etcd/issues/11457), commits `3898452b5` and `e0ff5ca31` (PR [#11490](https://github.com/etcd-io/etcd/pull/11490)) rewrote `api_guarantees.md` to state that default KV reads, writes, and multi-key `Txn`s are **strictly serializable** (while `WithSerializable()` downgrades reads to stale committed state on the local replica) and that Watch operations are **not linearizable**.
+1. **Correction of `api_guarantees.md` Consistency Definitions (§1.1, §4, PR [#11474](https://github.com/etcd-io/etcd/pull/11474) / `23810ea28`):**
+   Jepsen noted that etcd's pre-2020 `Documentation/learning/api_guarantees.md` misstated distributed-systems consistency guarantees—claiming that etcd ensured *"sequential consistency, the strongest consistency guarantee available"* and defining linearizability in terms of a *"loosely synchronized global clock"*. Commit `23810ea28` (PR [#11474](https://github.com/etcd-io/etcd/pull/11474)) rewrote `api_guarantees.md` to state that default KV reads, writes, and multi-key `Txn`s are **strictly serializable** (while `WithSerializable()` downgrades reads to stale committed state on the local replica) and that Watch operations are **not linearizable**.
 2. **Why Jepsen's Watch Workload Observed In-Order Delivery Without Silent Stalls (§2.5, `jepsen.etcd.watch`):**
-   Jepsen reported that apart from the `start_revision = 0` behavior (§3.2 below, [#11496](https://github.com/etcd-io/etcd/issues/11496)), *"watches appear to deliver every update to a key in order."* Inspecting Jepsen's test design ([Jepsen `etcd 3.4.3` §2.5](https://jepsen.io/analyses/etcd-3.4.3), `jepsen.etcd.watch` at `watch.clj#L131-L197`) explains why it did not hit the silent watch hangs documented above:
-   - Each Jepsen worker watched a single key **only for a few seconds at a time**, then closed the watch and opened a fresh watch starting at the last observed revision (`WithRev(lastSeenRev)`). By construction, Jepsen's harness performed **scheduled watch rotation every few seconds**, which automatically escaped any minority-partitioned or stalled node (`k8s#59848`) rather than maintaining long-lived reflector streams.
-   - Jepsen tested Go `clientv3`, which preserves explicit `ws.initReq.rev > 0` across `Created` (`client/v3/watch.go:858 @ v3.7.3`), whereas `jetcd`'s `WatchImpl.processCreated` historical cursor jump (`WatchImpl.java:267`, §5.1) was introduced 18 months later in July 2021 (`70be01a` / `jetcd#946`).
+   Jepsen reported that apart from the `start_revision = 0` behavior (§3.2 below, [#11496](https://github.com/etcd-io/etcd/issues/11496)), *"watches appear to deliver every update to a key in order."* Inspecting Jepsen's Clojure/JVM harness ([Jepsen `etcd 3.4.3` §2.5](https://jepsen.io/analyses/etcd-3.4.3), `src/jepsen/etcd/watch.clj:131-204, 227-255 @ 0.1.0` / `:139-212, 235-267 @ b47cc40`, which uses Java `jetcd`—`io.etcd/jetcd-core "0.4.1"` at tag `0.1.0` and `"0.8.5"` at `b47cc40`) explains why it neither hit silent watch hangs nor triggered `jetcd`'s internal `resume()` cursor bug (§5.1):
+   - Each Jepsen worker watched a single key **only for `(rand-int 5000)` ms at a time**, then closed the `Watcher` and opened a fresh `Watcher` starting at `(inc revision)` (`lastSeenRev + 1`, `src/jepsen/etcd/watch.clj:143 @ 0.1.0`, `:151 @ b47cc40`). By construction, Jepsen's harness performed **scheduled watch rotation every few seconds**, which automatically escaped any minority-partitioned or stalled node (`k8s#59848`) rather than maintaining long-lived reflector streams.
+   - Furthermore, although `jetcd 0.4.1` (`0.1.0`) had the unconditional `revision = response.getHeader().getRevision()` assignment on `Created` and `jetcd 0.8.5` (`b47cc40`) has `Math.max(revision, Header.Revision)` (`70be01a` / `jetcd#946`, §5.1), `watch.clj` (`:185-196, 236-254 @ b47cc40`; `:177-188, 224-242 @ 0.1.0`) aborts the watch operation on any `onError` callback without advancing its Clojure `@revision` atom and opens a brand-new `Watcher` at `(inc revision)` rather than relying on `WatcherImpl.resume()`.
 
 ---
 
@@ -290,7 +288,7 @@ In its [analysis of `etcd 3.4.3`](https://jepsen.io/analyses/etcd-3.4.3) (`2020-
 #### 3.1.1 How `WithRequireLeader` Works and Why It Was Added
 
 **Target Scenario:**
-Consider a 3-node cluster $\{M_1, M_2, M_3\}$ where a client's watch stream is connected to $M_1$. A network partition isolates $M_1$ from $\{M_2, M_3\}$, while the TCP connection between the client and $M_1$ remains healthy. $\{M_2, M_3\}$ form a majority quorum and continue committing writes. Because the client–$M_1$ network link is intact, HTTP/2 keepalive pings succeed. Without `WithRequireLeader`, $M_1$ never closes the watch stream, and any `RequestProgress` or `WithProgressNotify` tick on $M_1$ returns `ProgressNotify` responses bearing $M_1$'s frozen local revision (`#17611`).
+Consider a 3-node cluster $\{M_1, M_2, M_3\}$ where a client's watch stream is connected to $M_1$. A network partition isolates $M_1$ from $\{M_2, M_3\}$, while the TCP connection between the client and $M_1$ remains healthy. $\{M_2, M_3\}$ form a majority quorum and continue committing writes. Because the client–$M_1$ network link is intact, HTTP/2 keepalive pings succeed. Without `WithRequireLeader`, $M_1$ never closes the watch stream, and any `RequestProgress` or `WithProgressNotify` tick on $M_1$ returns `ProgressNotify` responses bearing $M_1$'s frozen local revision (`#8673`, `#8980`, `kubernetes/kubernetes#89488`).
 
 **Mechanism & Raft Timing (`v3.7.3`):**
 To detect this minority partition, `WithRequireLeader` was introduced in May 2016 (PRs `#5324`, `#5328`, `#5332`):
@@ -304,20 +302,22 @@ To detect this minority partition, `WithRequireLeader` was introduced in May 201
 
 - **Code & Issue References:**
   - Historical introduction & adoption: etcd PRs `#5324` (`19221b33c`), `#5328` (`68eaf4083`), `#5332` (`9c103dd0d`), `#9872`; issues `#5354`, `#7247`, `#8673`; Kubernetes `#89488`, PR `#89881`.
-  - Client metadata & stream keying: `client/v3/ctx.go:30-41`, `client/v3/watch.go:330, 1086-1091 @ v3.7.3`; `WatchOption.java:154`, `WatchImpl.java:155-161 @ jetcd-0.8.7`.
+  - Client metadata & stream keying: `client/v3/ctx.go:28-38`, `client/v3/watch.go:330, 1086-1091 @ v3.7.3`; `WatchOption.java:154`, `WatchImpl.java:155-161 @ jetcd-0.8.7`.
   - Raft step-down & election timers: `server/embed/config.go:533-534`, `server/etcdserver/bootstrap.go:548`, `server/etcdserver/raft.go:181-206 @ v3.7.3`; `raft.go:917-929, 1281-1284 @ raft v3.7.0`.
-  - Server interceptor & `monitorLeader` (`server/etcdserver/api/v3rpc/interceptor.go:63-67, 239-258, 315-354 @ v3.7.3`):
+  - Server interceptor & `monitorLeader` (`server/etcdserver/api/v3rpc/interceptor.go:38, 68-72, 239-258, 315-354 @ v3.7.3`):
     ```go
-    if hasLeaderRequirement(md) {
-        if s.Leader() == types.ID(raft.None) {
-            return rpctypes.ErrGRPCNoLeader
-        }
-        cctx := newCancellableContext(ss.Context())
-        ss = &serverStreamWithCtx{ctx: cctx, ServerStream: ss}
-        smap.mu.Lock()
-        smap.streams[ss] = struct{}{}
-        smap.mu.Unlock()
-        ...
+    if ks := md[rpctypes.MetadataRequireLeaderKey]; len(ks) > 0 && ks[0] == rpctypes.MetadataHasLeader {
+    	if s.Leader() == types.ID(raft.None) {
+    		return rpctypes.ErrGRPCNoLeader
+    	}
+
+    	ctx := newCancellableContext(ss.Context())
+    	ss = serverStreamWithCtx{ctx: ctx, ServerStream: ss}
+
+    	smap.mu.Lock()
+    	smap.streams[ss] = struct{}{}
+    	smap.mu.Unlock()
+    	...
     }
     ```
 
@@ -332,13 +332,13 @@ Tracing `etcd v3.7.3` and `jetcd 0.8.7` in the exact 1-node-partitioned or 1-nod
 - **Mechanism & Evidence:**
   - When a member crashes cleanly, `watchGRPCStream` transparently switches to $M_2$ or $M_3$ and resumes every substream at `ws.initReq.rev` without closing the user's `WatchChan` (`TestBalancerUnderServerShutdownWatch`, `tests/integration/clientv3/connectivity/server_shutdown_test.go:33-114 @ v3.7.3`).
   - `clientv3`'s general retry helper `isHaltErr(ctx, err)` (`client/v3/client.go:570-585`, `client_test.go:162-165 @ v3.7.3`) explicitly classifies `v3rpc.ErrNoLeader` (`codes.Unavailable`) as **non-halting (`false`)** so RPCs retry on another endpoint.
-  - Yet `watchGRPCStream.run()` (`client/v3/watch.go:665-670 @ v3.7.3`) explicitly overrides `isHaltErr` to force a terminal exit on `ErrNoLeader`:
+  - Yet `watchGRPCStream.run()` (`client/v3/watch.go:665-670 @ v3.7.3`, with `w.closeErr = closeErr` executed in `defer` at `:521`) explicitly overrides `isHaltErr` to force a terminal exit on `ErrNoLeader`:
     ```go
     case err := <-w.errc:
-        if isHaltErr(w.ctx, err) || errors.Is(ContextError(w.ctx, err), v3rpc.ErrNoLeader) {
-            w.closeErr = err
-            return
-        }
+    	if isHaltErr(w.ctx, err) || errors.Is(ContextError(w.ctx, err), v3rpc.ErrNoLeader) {
+    		closeErr = err
+    		return
+    	}
     ```
   - Java `jetcd` copies the same override (`jetcd-core/src/main/java/io/etcd/jetcd/impl/WatchImpl.java:353-355 @ jetcd-0.8.7`):
     ```java
@@ -352,14 +352,12 @@ Tracing `etcd v3.7.3` and `jetcd 0.8.7` in the exact 1-node-partitioned or 1-nod
 - **Finding:** When `ErrNoLeader` terminates a `startRev == 0` watch created without `WithCreatedNotify()`, `clientv3` discards the creation revision it recorded internally and delivers a close response with `Header.Revision == 0`. A caller that catches `ErrNoLeader` and re-opens `Watch()` on the surviving quorum has no revision bookmark and **silently misses every write committed during the 3–5 s partition window**.
 - **Mechanism & Evidence:**
   1. When a caller opens `wch := cli.Watch(WithRequireLeader(ctx), "a")` on $M_1$ at revision `100`, the server sends `WatchResponse{Created: true, Header: {Revision: 100}}`.
-  2. Because `ws.initReq.createdNotify` defaults to `false`, `serveSubstream` (`client/v3/watch.go:846-872 @ v3.7.3`) swallows the `Created` message and stores `100` privately in `ws.initReq.rev` (`line 871`). The caller has received nothing on `wch` and does not know revision `100`.
+  2. Because `ws.initReq.createdNotify` defaults to `false`, `serveSubstream` (`client/v3/watch.go:838-872 @ v3.7.3`) swallows the `Created` message and stores `100` privately in `ws.initReq.rev` (`line 871`). The caller has received nothing on `wch` and does not know revision `100`.
   3. While $M_1$ is partitioned and waiting 3 election timeouts, the surviving quorum $\{M_2, M_3\}$ commits `Put("a", "b")` at revision `101`.
-  4. When $M_1$ aborts the stream with `ErrGRPCNoLeader`, `run()` refuses to resume internally (Failure #1) and calls `closeSubstream(ws)` (`client/v3/watch.go:488-503 @ v3.7.3`):
+  4. When $M_1$ aborts the stream with `ErrGRPCNoLeader`, `run()` refuses to resume internally (Failure #1) and calls `closeSubstream(ws)` (`client/v3/watch.go:487-498 @ v3.7.3`):
      ```go
-     closeResp := &WatchResponse{
-         Header:   &pb.ResponseHeader{},
-         Canceled: true,
-         closeErr: w.closeErr,
+     if closeErr := w.closeErr; closeErr != nil && ws.initReq.ctx.Err() == nil {
+     	go w.sendCloseSubstream(ws, &WatchResponse{Header: &pb.ResponseHeader{}, Canceled: true, closeErr: w.closeErr})
      }
      ```
   5. `closeSubstream` sends an empty `&pb.ResponseHeader{}` (`Header.Revision == 0`), throwing away `ws.initReq.rev` (`100`). When the caller re-opens `cli.Watch(WithRequireLeader(ctx), "a")` on $\{M_2, M_3\}$, it starts at the quorum's new revision (`101+`), permanently missing revision `101`.
@@ -370,30 +368,31 @@ Tracing `etcd v3.7.3` and `jetcd 0.8.7` in the exact 1-node-partitioned or 1-nod
   - When $M_1$ cancels the stream with `ErrGRPCNoLeader`, gRPC sends HTTP/2 stream trailers (`RST_STREAM`), **not** a connection-level `GOAWAY` frame. Because the TCP link between the client and $M_1$ is intact, `grpc-go`'s `round_robin` balancer keeps $M_1$'s `SubConn` in state `READY`.
   - In `openWatchClient()` (`client/v3/watch.go:1039-1062 @ v3.7.3`), the loop checks `if ws, err = w.remote.Watch(w.ctx, w.callOpts...); ws != nil && err == nil { break }`.
   - In gRPC, `w.remote.Watch()` (`ClientConn.NewStream()`) only allocates a local HTTP/2 stream ID and writes request `HEADERS` to a `READY` `SubConn`; it **does not wait for the server's `newStreamInterceptor` (`interceptor.go:240`) to run**. Thus `w.remote.Watch()` immediately returns `ws != nil, err == nil` even when `round_robin` selects partitioned $M_1$.
-  - `serveWatchClient(wc)` (`watch.go:772, 933`) then calls `wc.Recv()`, receives $M_1$'s `ErrGRPCNoLeader` trailer asynchronously, and kills the newly created `WatchChan` again.
-  - **Test suite confirmation (`tests/integration/clientv3/connectivity/network_partition_test.go:205-248 @ v3.7.3`, commit `a57e967d84`):** When etcd switched to standard gRPC `round_robin`, `testBalancerUnderNetworkPartitionWatch` failed whenever the new watch landed on partitioned `M0`. Rather than fixing `watchGRPCStream`, commit `a57e967d84` commented out `watchCli.SetEndpoints(eps...)` and hard-coded a non-partitioned target endpoint (`targetEp := eps[(lead+1)%3]`, lines `228-238`).
+  - `serveWatchClient(wc)` (`watch.go:772, 970`) then calls `wc.Recv()`, receives $M_1$'s `ErrGRPCNoLeader` trailer asynchronously, and kills the newly created `WatchChan` again.
+  - **Test suite blind spot (`tests/integration/clientv3/connectivity/network_partition_test.go:209-264 @ v3.7.3`, commit `a57e967d84`):** `testBalancerUnderNetworkPartitionWatch` pins `watchCli` to a single endpoint (`Endpoints: []string{eps[target]}`, `:227`) before partitioning `target` (`:250-253`) and asserts `ErrNoLeader` (`:260`)—commit `a57e967d84` explicitly deleted `watchCli.SetEndpoints(eps...)` (`:236-238`) so `round_robin` would not place the initial watch on another member, leaving multi-endpoint watch failover and post-partition re-watch completely untested.
 
 ###### Failure #4: Silent Discard of Buffered Events (`ws.buf`) and Drop of `ErrNoLeader` After `250ms` (**Moderate confidence** on encounter frequency)
 - **Finding:** When `ErrNoLeader` aborts `watchGRPCStream`, `clientv3` immediately discards any unread event batches queued in `ws.buf`, and if the 1-slot output channel `ws.outc` is occupied for more than `250ms`, `clientv3` silently drops the final `Canceled: true` / `ErrNoLeader` response and closes `WatchChan` with no error (**Moderate confidence** on encounter frequency since `ws.outc` must stay full for $>250\text{ ms}$).
-- **Mechanism & Evidence (`client/v3/watch.go:40, 478-500, 520-541, 818-836 @ v3.7.3`):**
+- **Mechanism & Evidence (`client/v3/watch.go:39, 478-498, 520-541, 818-836 @ v3.7.3`):**
   1. When `run()` exits on `ErrNoLeader`, its `defer` (`line 525`) closes `ws.recvc`.
   2. Closing `ws.recvc` causes `serveSubstream` (`line 835`) to `return` immediately without draining `ws.buf` to `ws.outc`, losing all buffered events that had already arrived from the server.
-  3. Next, `closeSubstream` calls `sendCloseSubstream` (`lines 478-485`) with `closeSendErrTimeout = 250 * time.Millisecond` (`line 40`):
+  3. Next, `closeSubstream` spawns `sendCloseSubstream` (`lines 478-485`) with `closeSendErrTimeout = 250 * time.Millisecond` (`line 39`):
      ```go
      func (w *watchGRPCStream) sendCloseSubstream(ws *watcherStream, resp *WatchResponse) {
-         select {
-         case ws.outc <- *resp:
-         case <-ws.initReq.ctx.Done():
-         case <-time.After(closeSendErrTimeout):
-         }
+     	select {
+     	case ws.outc <- *resp:
+     	case <-ws.initReq.ctx.Done():
+     	case <-time.After(closeSendErrTimeout):
+     	}
+     	close(ws.outc)
      }
      ```
-  4. Because `ws.outc` has buffer capacity `1` (`line 558`), if `ws.outc` already holds 1 unconsumed event while the caller is busy for $> 250\text{ ms}$, `sendCloseSubstream` times out, drops `closeResp`, and closes `ws.outc` (`line 500`), violating the documented contract (`client/v3/watch.go:67-70 @ v3.7.3`: *"The last message will be a watch response with Canceled set to true, and Err() will return a non-nil error"*).
+  4. Because `ws.outc` has buffer capacity `1` (`line 558`), if `ws.outc` already holds 1 unconsumed event while the caller is busy for $> 250\text{ ms}$, `sendCloseSubstream` times out, drops `resp`, and closes `ws.outc` (`line 484`), violating the documented `WatchResponse.Canceled` contract (`client/v3/watch.go:108-111 @ v3.7.3`: *"If the watch failed and the stream was about to close, before the channel is closed, the channel sends a final response that has Canceled set to true with a non-nil Err()."*).
 
 ###### Failure #5: Permanent Client Goroutine Deadlock in `w.wg.Wait()` (`#17611` / `#17622`) (**Moderate confidence** on production race reachability)
 - **Finding:** If `ErrNoLeader` arrives on `w.errc` right after a substream receives a rejected or canceled `Created` response, `watchGRPCStream.run()` deadlocks permanently in `w.wg.Wait()` (**Moderate confidence** on reachability in production since `ErrNoLeader` must race with a rejected/canceled `Created` response).
 - **Mechanism & Evidence (`client/v3/watch.go:466-476, 520-541, 601-609, 803 @ v3.7.3`):**
-  - When `w.resuming[0]` receives a `Created` response with `WatchId == InvalidWatchID` or `Canceled && CancelReason != ""`, `addSubstream` (`lines 468-472`) closes `ws.recvc` and returns `false` (so `ws` is not added to `w.substreams`), and `line 607` sets `w.resuming[0] = nil` (removing `ws` from `w.resuming`).
+  - When `w.resuming[0]` receives a `Created` response with `WatchId == InvalidWatchID` or `Canceled && CancelReason != ""`, `addSubstream` (`lines 466-476`) closes `ws.recvc` and returns early (so `ws` is not added to `w.substreams`), and `line 607` sets `w.resuming[0] = nil` (removing `ws` from `w.resuming`).
   - `serveSubstream` exits on closed `ws.recvc` and blocks in its `defer` at `w.closingc <- ws` (`line 803`) before calling `w.wg.Done()`.
   - If `ErrNoLeader` arrives on `w.errc` before `run()` selects `<-w.closingc`, `run()` enters its `defer` (`lines 520-541`), which only iterates over `w.substreams` and `w.resuming` (neither contains `ws`), never drains `w.closingc`, and blocks forever at `w.wg.Wait()` (`line 539`).
 
@@ -407,10 +406,10 @@ Tracing `etcd v3.7.3` and `jetcd 0.8.7` in the exact 1-node-partitioned or 1-nod
 
 ###### Failure #7: Server-Side and Transport Blind Spots (Apply Stall, Paused Node, or Unreachable Cluster) (**Moderate confidence** on items 1–2 schedules)
 - **Finding:** Even with `WithRequireLeader` on a direct connection, watches hang indefinitely in four non-minority-partition failure states:
-  1. *Apply-loop stall while Raft keeps ticking (**Moderate confidence** on stall schedule inferred from code):* `monitorLeader` only checks `s.Leader() == raft.None` (`interceptor.go:329`), which is updated in the Raft loop (`raft.go:181-206`), whereas committed entries are applied on the separate `s.applySched` FIFO goroutine (`server.go:843-845`). If `s.applySched` blocks or stalls (`#22184`, `#22635`), `s.Leader()` stays non-zero and `monitorLeader` never fires while all watches on that member go silent.
+  1. *Apply-loop stall while Raft keeps ticking (**Moderate confidence** on stall schedule inferred from code):* `monitorLeader` only checks `s.Leader() == raft.None` (`interceptor.go:329`), which is updated in the Raft loop (`raft.go:181-206`), whereas committed entries are applied on `(*EtcdServer).run()`'s separate `sched` (`schedule.NewFIFOScheduler`) goroutine (`server.go:764, 843-845`). If that apply FIFO blocks or stalls (`#22184`, `#22635`), `s.Leader()` stays non-zero and `monitorLeader` never fires while all watches on that member go silent.
   2. *Intermittent heartbeats on a degraded link (**Moderate confidence** on lossy-link schedule inferred from code):* Because `monitorLeader` resets `noLeaderCnt = 0` whenever a single sample sees `s.Leader() != raft.None` (`interceptor.go:329-333`), a follower receiving occasional small `MsgHeartbeat` packets over a lossy link resets `noLeaderCnt` and never cancels its streams.
   3. *Paused server (`SIGSTOP` / VM freeze) or black-holed TCP link:* A paused process cannot run `monitorLeader`, leaving detection to client HTTP/2 keepalive pings—which Go `clientv3` disables by default (`DialKeepAliveTime == 0` at `client/v3/client.go:231-236 @ v3.7.3`, whereas `jetcd` defaults to `30s`/`10s` at `ClientBuilder.java:66-68 @ jetcd-0.8.7`).
-  4. *Client partitioned from all members:* Because `streamKeyFromCtx` strips deadlines (`client/v3/watch.go:274`) and `openWatchClient` retries forever with `WaitForReady(true)` (`watch.go:85-91, 1039`, `options.go:24`), complete client isolation blocks silently forever (`#8980`).
+  4. *Client partitioned from all members:* Because `valCtx` strips deadlines (`client/v3/watch.go:274-282`) and `openWatchClient` retries forever with `WaitForReady(true)` (`watch.go:85-91, 1039`, `options.go:29`), complete client isolation blocks silently forever (`#8980`).
 
 ###### Failure #8: `grpcproxy` Completely Ignores `WithRequireLeader` and Splits Its Leader Detector Across Streams
 - **Finding:** Any watch routed through `etcd grpc-proxy` silently loses `WithRequireLeader` protection because the proxy inspects the wrong gRPC metadata context on incoming streams, and furthermore routes its internal leader-loss watch on a separate gRPC stream from its data watches.
@@ -446,7 +445,7 @@ When an application starts a watch with `startRev == 0` (either omitting `WithRe
 In its [`etcd 3.4.3` report (§3.1 *"Watching With Revision 0"*)](https://jepsen.io/analyses/etcd-3.4.3), Jepsen filed [#11496](https://github.com/etcd-io/etcd/issues/11496) (*"Watches which begin at revision 0 actually start later"*):
 - **The proto3 `0` vs. `1` trap:** In etcd's MVCC store, revision `0` is the empty initial cluster state (no events ever occur at revision `0`), and the first write creates revision `1`. Because `WatchCreateRequest.start_revision` is a proto3 `int64` scalar (`api/etcdserverpb/rpc.proto:785 @ v3.7.3`), passing `start_revision: 0` on the wire is indistinguishable from leaving `start_revision` unset. Consequently, `watchableStore.watch()` (`server/storage/mvcc/watchable_store.go:142-144 @ v3.7.3`) treats `startRev == 0` as *"start at `s.store.currentRev + 1` (now)"*, whereas a caller who wants to watch all history from the beginning of the cluster must pass **`start_revision: 1`**.
 - **What PR [#11559](https://github.com/etcd-io/etcd/pull/11559) (`342c2464a`, Jan 2020) fixed vs. what remains broken at `v3.7.3` and `jetcd-0.8.7` / `0.8.8`:**
-  1. *Fixed in Go docs (`v3.7.3`):* PR [#11559](https://github.com/etcd-io/etcd/pull/11559) updated `Documentation/learning/data_model.md` and `glossary.md` to state that revisions begin at `1`, and updated the Go `Watcher.Watch` docstring (`client/v3/watch.go:51-52 @ v3.7.3`) to state: `// If the requested revision is 0 or unspecified, the returned channel will return watch events that happen after the server receives the watch request.`
+  1. *Fixed in Go docs (`v3.7.3`):* PR [#11559](https://github.com/etcd-io/etcd/pull/11559) updated `Documentation/learning/data_model.md` and `glossary.md` to state that revisions begin at `1`, and updated the Go `Watcher.Watch` docstring (`client/v3/watch.go:68-69 @ v3.7.3`) to state: `// If the requested revision is 0 or unspecified, the returned channel will return watch events that happen after the server receives the watch request.`
   2. *Unfixed in `rpc.proto` (`api/etcdserverpb/rpc.proto:784 @ v3.7.3`):* As noted on [#11496](https://github.com/etcd-io/etcd/issues/11496#issuecomment-579240393) after PR [#11559](https://github.com/etcd-io/etcd/pull/11559) merged, the canonical protobuf comment still only says `// start_revision is an optional revision to watch from (inclusive). No start_revision is "now".` without explaining that `0` in proto3 means "no `start_revision`" (`current_revision + 1`) and `1` is required to watch from the start of history.
   3. *Copy-pasted `GetOption` docstring in `jetcd` (`WatchOption.java:161-170 @ jetcd-0.8.7` and `0.8.8`):* In `jetcd`, `WatchOption.Builder.withRevision(long rev)` has a copy-paste error from `GetOption`: *"If the revision is less or equal to zero, the get is over the newest key-value store."*
   4. *Even the PR [#11559](https://github.com/etcd-io/etcd/pull/11559) promise (`"events that happen after the server receives the watch request"`) is violated in `v3.7.3`:* Both the unlocked `Created` header race (item 3 below) and `WithRequireLeader` Failure #2 (§3.1.2) cause `startRev == 0` watches to replay pre-watch events or drop post-watch events on reconnect.
@@ -456,106 +455,130 @@ When `startRev == 0`, `watchableStore.watch()` binds the watcher's starting revi
 - If a client writes key $K$ at revision `100` (on the leader) and then opens a `startRev == 0` watch that lands on a lagging follower at revision `95`, `wa.minRev` is set to `96`. As the follower catches up, the watch delivers historical writes `96..100` that occurred *before* the watch was opened.
 
 #### 3. Unlocked `Created` Header Read + `clientv3` Off-by-One Resume (**Moderate confidence** on Case B race frequency)
-In `serverWatchStream.recvLoop`, the server registers the watcher under `watchableStore.mu.Lock()` (line 340), releases the lock, and then reads `sws.watchStream.Rev()` **outside the lock** (line 358) to populate `Created.Header.Revision`. Meanwhile, when `clientv3` receives `Created` for a `ws.initReq.rev == 0` watch, it sets `nextRev = wr.Header.Revision` **without adding `+ 1`**—because the comment author at `client/v3/watch.go:849-857` mistakenly assumed `StartRevision: 100` watches *after* revision `100`, overlooking that `start_revision` (`rpc.proto:784`) is **inclusive**.
+In `serverWatchStream.recvLoop`, the server registers the watcher under `watchableStore.mu.Lock()` (line 340), releases the lock, and then reads `sws.watchStream.Rev()` **outside the lock** (line 358) to populate `Created.Header.Revision`. Meanwhile, when `clientv3` receives `Created` for an initial `ws.initReq.rev == 0` watch (`ws.initReq.retc != nil`), it sets `nextRev = wr.Header.Revision` **without adding `+ 1`**—because the comment author at `client/v3/watch.go:849-857` (`wch := m1.Watch("a")` followed by `m2.Put("a", "b")`) assumed *"a current revision watch must resume at the store revision"*, overlooking that `start_revision` (`rpc.proto:784`) is **inclusive** rather than exclusive.
 
 If the stream disconnects right after `Created` (before the first event arrives), two failure cases occur depending on whether concurrent writes committed between lines 340 and 358:
 - **Case A (No concurrent write between line 340 and line 358 — $R_2 == R_1$):** At line 340, `currentRev` was $R_1$, so `wa.minRev = R_1 + 1`. At line 358, `Rev()` returns $R_1$. On `Created`, `clientv3` sets `ws.initReq.rev = R_1` (missing `+ 1`). On reconnect, `clientv3` requests `StartRevision = R_1` (inclusive), **replaying the event at revision $R_1$ which committed before the watch was created**.
 - **Case B (Concurrent writes commit between line 340 and line 358 — $R_2 > R_1$, **Moderate confidence** on production frequency since commits must interleave between lines 340 and 358 followed by a disconnect):** At line 340, `wa.minRev` was set to $R_1 + 1$. Before line 358 runs, the Raft apply loop commits writes at revisions $R_1 + 1, \dots, R_2$. Line 358 then reads `Rev() == R_2` and sends `Created { Header.Revision: R_2 }`. If the stream disconnects before the buffered event frames are read, `clientv3` sets `ws.initReq.rev = R_2` and reconnects at `StartRevision = R_2`, **silently dropping all committed events in $[R_1 + 1, R_2 - 1]$**.
 
 - **Code Evidence (`v3.7.3`):**
-  - Local `currentRev` binding (`server/storage/mvcc/watchable_store.go:141-147 @ v3.7.3`):
+  - Local `currentRev` binding (`server/storage/mvcc/watchable_store.go:139-148 @ v3.7.3`; note `wa.startRev` remains `startRev` from `:132`):
     ```go
     s.mu.Lock()
     s.revMu.RLock()
     synced := startRev > s.store.currentRev || startRev == 0
     if synced {
-        wa.minRev = s.store.currentRev + 1
-        if startRev > wa.minRev {
-            wa.minRev = startRev
-        }
-        wa.startRev = wa.minRev
+    	wa.minRev = s.store.currentRev + 1
+    	if startRev > wa.minRev {
+    		wa.minRev = startRev
+    	}
+    	s.synced.add(wa)
     }
     ```
-  - Unlocked `Created` header read (`server/etcdserver/api/v3rpc/watch.go:340-366 @ v3.7.3`):
+  - Unlocked `Created` header read (`server/etcdserver/api/v3rpc/watch.go:340-362 @ v3.7.3`):
     ```go
-    id, err := sws.watchStream.Watch(mvcc.WatchID(uv.WatchId), uv.Key, uv.RangeEnd, uv.StartRevision, filters...)
+    id, err := sws.watchStream.Watch(ctx, mvcc.WatchID(creq.WatchId), creq.Key, creq.RangeEnd, creq.StartRevision, filters...)
     ...
     wr := &pb.WatchResponse{
-        Header:   sws.newResponseHeader(sws.watchStream.Rev()),
-        WatchId:  int64(id),
-        Created:  true,
-        Canceled: err != nil,
+    	Header:   sws.newResponseHeader(sws.watchStream.Rev()),
+    	WatchId:  int64(id),
+    	Created:  true,
+    	Canceled: err != nil,
     }
     ```
-  - `clientv3` `Created` vs. `ProgressNotify` cursor update (`client/v3/watch.go:846-872 @ v3.7.3`):
+  - `clientv3` `Created` vs. `ProgressNotify` cursor update (`client/v3/watch.go:838-872 @ v3.7.3`):
     ```go
     if wr.Created {
-        if !resuming {
-            // 1) client establishes a watch on key "a" with revision 0
-            // 2) etcd returns a watch response with created=true, revision=100
-            // ...
-            // 5) client reconnects with etcd with revision 100, and will not miss the event at revision 101
-            if ws.initReq.rev == 0 {
-                nextRev = wr.Header.Revision
-            }
-            if ws.initReq.createdNotify {
-                ws.outc <- *wr
-            }
-        }
-        resuming = false
-    } else if len(wr.Events) == 0 && wr.CompactRevision == 0 {
-        // current progress of watch; <= store revision
-        nextRev = wr.Header.Revision + 1
+    	if ws.initReq.retc != nil {
+    		ws.initReq.retc <- ws.outc
+    		// to prevent next write from taking the slot in buffered channel
+    		// and posting duplicate create events
+    		ws.initReq.retc = nil
+
+    		// send first creation event only if requested
+    		if ws.initReq.createdNotify {
+    			ws.outc <- *wr
+    		}
+    		// once the watch channel is returned, a current revision
+    		// watch must resume at the store revision. This is necessary
+    		// for the following case to work as expected:
+    		//	wch := m1.Watch("a")
+    		//	m2.Put("a", "b")
+    		//	<-wch
+    		// If the revision is only bound on the first observed event,
+    		// if wch is disconnected before the Put is issued, then reconnects
+    		// after it is committed, it'll miss the Put.
+    		if ws.initReq.rev == 0 {
+    			nextRev = wr.Header.Revision
+    		}
+    	}
+    } else {
+    	// current progress of watch; <= store revision
+    	nextRev = wr.Header.Revision + 1
     }
+
     if len(wr.Events) > 0 {
-        nextRev = wr.Events[len(wr.Events)-1].Kv.ModRevision + 1
+    	nextRev = wr.Events[len(wr.Events)-1].Kv.ModRevision + 1
     }
+
     ws.initReq.rev = nextRev
     ```
 
 ---
 
-### 3.3 Failover to a Lagging Follower: "Future Revision" Watches and Server-Wide Progress Starvation
+### 3.3 Failover to a Lagging Follower: "Future Revision" Watches and Stream-Wide Progress Starvation
 
 When a client observes revision $R_{\text{leader}}$ (from a `Put`/`Get` or a watch stream on Member A), disconnects, and reconnects its watch with `StartRevision = R_{\text{leader}} + 1` to a lagging follower Member B whose local MVCC store is still at $R_{\text{follower}} < R_{\text{leader}}$, etcd creates a **"future revision" watch** (`startRev > s.store.currentRev`).
 
 #### 1. Why Future Revision Watches Are Placed in `s.synced`
-Because Member B has not yet applied revisions $(R_{\text{follower}}, R_{\text{leader}}]$, those revisions are not in Member B's `bbolt` database yet. `watchableStore.watch()` (`watchable_store.go:141-155 @ v3.7.3`) therefore classifies `startRev > s.store.currentRev` as `synced = true` and places the watcher in `s.synced` with `wa.minRev = wa.startRev = startRev`, relying on `notify()` (`line 465`) to filter out events with `ModRevision < w.minRev` until Member B catches up.
+Because Member B has not yet applied revisions $(R_{\text{follower}}, R_{\text{leader}}]$, those revisions are not in Member B's `bbolt` database yet. `watchableStore.watch()` (`watchable_store.go:132-148 @ v3.7.3`) therefore classifies `startRev > s.store.currentRev` as `synced = true` and places the watcher in `s.synced` with `wa.startRev = startRev` (`:132`) and `wa.minRev = startRev` (`:145`), relying on `notify()` (`:466`) $\to$ `watcher.send()` (`:559`) to filter out events with `ModRevision < w.minRev` until Member B catches up.
 
 #### 2. Historical Bugs Caused by Un-Caught-Up Watchers in `s.synced` (`< v3.7.0`)
 Prior to `v3.5.22` / `v3.6.2` / `v3.7.0`, placing a future-revision watcher in `s.synced` broke two invariants:
 - **`ProgressNotify` revision regression (`#20221`, `#19487`, `#15271`):** Because the watcher was in `s.synced`, `progressIfSync()` returned `true` with `Header.Revision = R_{\text{follower}} < \text{startRev}` (e.g., emitting revision `66` for a watch started at `148`). When `clientv3` received that `ProgressNotify` (`client/v3/watch.go:864`), it unconditionally executed `nextRev = wr.Header.Revision + 1`, **rewinding `nextRev` backwards from `148` to `67`** and replaying events `67..147` on the next reconnect.
 - **Snapshot `Restore()` lowering `wa.minRev` (`cf0369e4a`, PR `#20281`):** If lagging Member B restored a leader snapshot at $R_{\text{snap}} < \text{startRev}$, `Restore()` moved all `s.synced` watchers to `s.unsynced` and `syncWatchers()` overwrote `w.minRev = curRev + 1` ($R_{\text{snap}} + 1 < \text{startRev}$), delivering events older than `startRev`. Fixed in `cf0369e4a` (`watchable_store.go:374 @ v3.7.3`) via `w.minRev = max(curRev+1, w.minRev)`.
 
-#### 3. How the `v3.7.3` Fix (`973847aa2`, PR `#20229`) Causes Server-Wide `ProgressNotify` Starvation (`#20242`, `#20240`)
-To fix `#20221`, commit `973847aa2` rewrote `progressIfSync()` to check `s.unsynced`, `s.synced`, and `s.victims`. Because `s.unsynced`, `s.synced`, and `s.victims` are **server-wide** structures shared by every client connected to that etcd member, the `v3.7.3` implementation introduces severe cross-client starvation:
-1. **Any single unsynced watcher blocks progress for the entire server:** If *any* client on the server has a watcher in `s.unsynced` (`len(s.unsynced.watchers) > 0`), `progressIfSync()` immediately returns `false` (`line 521`) for every other watcher on the server.
-2. **Any single future-revision watcher blocks `RequestProgressAll()` and randomly blocks `RequestProgress(id)`:** The loop `for w := range s.synced.watchers` (`line 524`) iterates over a Go map in randomized order. If `id == 0` (`RequestProgressAll()`, used by `WatchProgressRequest` at `v3rpc/watch.go:397`), or if `id != 0` and map iteration visits *any* other client's watcher with `rev < w.startRev` before visiting `w.id == id`, `progressIfSync()` returns `false`.
-3. **Any single victim batch blocks `RequestProgressAll()`:** If `len(s.victims) > 0`, `progressIfSync(0)` returns `false` (`line 532`) for every `WatchProgressRequest` on the server.
-4. **10-minute silent drop on `progressTicker`:** When `sendLoop`'s `progressTicker` fires (default `10m`, `v3rpc/watch.go:46, 558-568`), a `false` return from `RequestProgress(id)` silently drops the notification and resets `sws.progress[id] = true` for another 10 minutes (`#20242`). This forced etcd to disable progress notification validation in its robustness test suite (`b51415c3f`, PR `#20240`).
+#### 3. How the `v3.7.3` Fix (`973847aa2`, PR `#20229`) Starves `WatchProgressRequest` Across Multiplexed gRPC Streams (`#20242`, `#20240`)
+To fix `#20221`, commit `973847aa2` updated `progressIfSync(watchers, responseWatchID)` to verify that every watcher in the caller-supplied `watchers` map is present in `s.synced.watchers` and satisfies `rev >= w.startRev`:
+1. **Any single unsynced, victim, or future-revision watcher on a shared `watchStream` blocks `WatchProgressRequest` (`RequestProgressAll`) for the entire stream:** When a client calls `RequestProgress(ctx)`, `recvLoop` (`server/etcdserver/api/v3rpc/watch.go:395-400`) invokes `sws.watchStream.RequestProgressAll()` (`server/storage/mvcc/watcher.go:206-210` $\to$ `watchable_store.go:511-513`), passing **`ws.watchers`—every watcher multiplexed onto that gRPC `Watch` stream**. Because Go `clientv3` multiplexes all watches sharing the same context metadata (`streamKeyFromCtx`) onto a single `watchGRPCStream`, if *any one* watcher on that stream is catching up in `s.unsynced`, waiting in `s.victims`, or waiting for a future revision (`rev < w.startRev`), `progressIfSync()` immediately returns `false` (`lines 522-527`) and suppresses on-demand `ProgressNotify` (`WatchID = -1`) for all synchronized watchers on that stream (`#20242`). (Additionally, if `len(ws.watchers) == 0`—as in Failure #6—`progressIfSync()` vacuously returns `true` at `:539` without sending any response.)
+2. **Per-watcher `WithProgressNotify()` (`progressTicker`) drops individual 10-minute ticks while unsynced or awaiting `startRev`:** Unlike `RequestProgressAll()`, `sendLoop`'s periodic `progressTicker` (default `progressReportInterval = 10 * time.Minute` plus 0–10% jitter, `v3rpc/watch.go:94, 99-110, 558-570`) calls `sws.watchStream.RequestProgress(id)` (`watcher.go:196-204` $\to$ `watchable_store.go:507-509`), which passes a single-entry map `map[WatchID]*watcher{w.id: w}`. Thus periodic `ProgressNotify` is strictly per-watcher (never blocked by other watchers), though if `w` itself is unsynced or has `rev < w.startRev` when the ticker fires, `progress(w)` silently emits nothing and `sendLoop` resets `sws.progress[id] = true` (`v3rpc/watch.go:565`) until the next 10-minute tick.
+3. **Robustness test liveness check disabled (`PR #20240`):** Because multiplexed watchers on a shared `clientv3` stream routinely starved `RequestProgress` under `#20242`, etcd removed `ValidateGotAtLeastOneProgressNotify` from its robustness suite (`b51415c3f`, PR `#20240`, while retaining monotonicity checks in `validateBookmarkable` at `tests/robustness/validate/watch.go:111-137`).
 
-- **Code Evidence (`server/storage/mvcc/watchable_store.go:515-539 @ v3.7.3`):**
+- **Code Evidence (`server/storage/mvcc/watchable_store.go:507-540 @ v3.7.3`):**
   ```go
-  func (s *watchableStore) progressIfSync(id WatchID) (int64, bool) {
-      s.mu.RLock()
-      defer s.mu.RUnlock()
-      rev := s.rev()
-      //Check if all watchers are synced
-      if len(s.unsynced.watchers) > 0 {
-          return rev, false
-      }
-      for w := range s.synced.watchers {
-          if rev < w.startRev {
-              return rev, false
-          }
-          if id != 0 && w.id == id {
-              return rev, true
-          }
-      }
-      if id == 0 && len(s.victims) == 0 {
-          return rev, true
-      }
-      return rev, false
+  func (s *watchableStore) progress(w *watcher) {
+  	s.progressIfSync(map[WatchID]*watcher{w.id: w}, w.id)
+  }
+
+  func (s *watchableStore) progressAll(watchers map[WatchID]*watcher) bool {
+  	return s.progressIfSync(watchers, clientv3.InvalidWatchID)
+  }
+
+  func (s *watchableStore) progressIfSync(watchers map[WatchID]*watcher, responseWatchID WatchID) bool {
+  	s.mu.RLock()
+  	defer s.mu.RUnlock()
+
+  	rev := s.rev()
+  	// Any watcher unsynced?
+  	for _, w := range watchers {
+  		if _, ok := s.synced.watchers[w]; !ok {
+  			return false
+  		}
+  		if rev < w.startRev {
+  			return false
+  		}
+  	}
+
+  	// If all watchers are synchronised, send out progress
+  	// notification on first watcher. Note that all watchers
+  	// should have the same underlying stream, and the progress
+  	// notification will be broadcasted client-side if required
+  	// (see dispatchEvent in client/v3/watch.go)
+  	for _, w := range watchers {
+  		w.send(WatchResponse{WatchID: responseWatchID, Revision: rev})
+  		return true
+  	}
+  	return true
   }
   ```
 
@@ -563,28 +586,28 @@ To fix `#20221`, commit `973847aa2` rewrote `progressIfSync()` to check `s.unsyn
 
 ### 3.4 Historical Ledger of Repaired Watch Guarantee Violations
 
-While watched KV mutations have always gone through Raft, etcd's member-local watch catch-up, snapshot restore, compaction, and cross-member resumption paths repeatedly violated the documented Watch safety promises prior to `v3.7.1`. All entries below are verified against `tests/robustness/README.md:19-39 @ v3.7.3` and git commit history (note that `#20573` was closed without an identified root cause, **Moderate confidence**):
+While watched KV mutations have always gone through Raft, etcd's member-local watch catch-up, snapshot restore, compaction, and cross-member resumption paths repeatedly violated the documented Watch safety promises prior to `v3.7.1`. The entries below are verified against `tests/robustness/README.md:19-39 @ v3.7.3`, GitHub issues/PRs, and git commit history (note that `#20573` was closed without an identified root cause, **Moderate confidence**):
 
 | Issue / PR & Commit | Promise Violated | Root Cause & Failover / Recovery Trigger | Introduced | Fixed In |
 |---|---|---|---|---|
-| [#8411](https://github.com/etcd-io/etcd/issues/8411) | **Reliable** (permanent silence after heal) | `watchableStore.Restore` did not exist; when a partitioned member (e.g., deposed leader) rejoined and restored a leader snapshot, its existing watchers never received events again. | `v3.1.x` | 2017 (`watchableStore.Restore`) |
+| [#8411](https://github.com/etcd-io/etcd/issues/8411) (`13041c15b`) | **Reliable** (permanent silence after heal) | `watchableStore.Restore` did not exist; when a partitioned member (e.g., deposed leader) rejoined and restored a leader snapshot, its existing watchers never received events again. | `v3.1.x` | 2017 (`watchableStore.Restore`) |
 | [#15220](https://github.com/etcd-io/etcd/issues/15220) / PR [#15237](https://github.com/etcd-io/etcd/pull/15237) (`74feb229c`) | **Bookmarkable** & **Resumable** (silent event loss on reconnect) | `WatchProgressRequest` sent `ProgressNotify` via `ctrlStream` ahead of pending events in `watchStream.Chan()`, advancing the client's bookmark revision past undelivered events (cited in Kubernetes KEP-2340). | $\le$ `v3.4` | `v3.4.25`, `v3.5.8`, `v3.6.0` |
-| [#17507](https://github.com/etcd-io/etcd/issues/17507) (`579b22cf3`) | **Bookmarkable** liveness | Regression from `#15237` where a newly created watch that had not yet received any events never answered `RequestProgress`. | `v3.5.8` | `v3.5.13`, `v3.6.0` |
+| [#17507](https://github.com/etcd-io/etcd/issues/17507) / PR [#17557](https://github.com/etcd-io/etcd/pull/17557) (`6103504d4`, `579b22cf3`) | **Bookmarkable** liveness | Regression from `#15237` where a newly created watch that had not yet received any events never answered `RequestProgress`. | `v3.5.8` | `v3.5.13`, `v3.6.0` |
 | [#15271](https://github.com/etcd-io/etcd/issues/15271) / PR [#15492](https://github.com/etcd-io/etcd/pull/15492) (`a690707c5`) | **Ordered** & **Unique** ("watch traveling back in time") | `notify()` did not advance `w.minRev` while a watcher was in `s.synced`; when a member restored a leader snapshot after a partition (`watchableStore.Restore`), moving synced watchers to `s.unsynced` replayed already-delivered historical events (`watchable_store.go:486 @ v3.7.3`). | $\le$ `v3.4` | `v3.4.25`, `v3.5.8`, `v3.6.0` |
 | [#17247](https://github.com/etcd-io/etcd/issues/17247) | **Unique** (duplicate event) | Bug in `Txn` range caching emitted duplicate watch events on `main` (caught by robustness tests before release). | `main` only | Never released |
 | [#17529](https://github.com/etcd-io/etcd/issues/17529) / PR [#17555](https://github.com/etcd-io/etcd/pull/17555) (`405862e80`) | **Reliable** (silent interior gap across compaction) | When `w.ch` was full while `chooseAll` attempted to send a `CompactRevision` cancel (`watcher_group.go:255`), `syncWatchers()` failed to skip `w` (`watchable_store.go:369-373 @ v3.7.3`), advancing `w.minRev = curRev + 1` and moving `w` to `s.synced` without sending `ErrCompacted`. Caused `kube-apiserver` to retain deleted pods for $>24\text{h}$ (`kubernetes/kubernetes#123072`). | $\le$ `v3.4` | `v3.4.31`, `v3.5.13`, `v3.6.0` |
-| [#18089](https://github.com/etcd-io/etcd/issues/18089) / PR [#18274](https://github.com/etcd-io/etcd/pull/18274) | **Reliable** (dropped `DELETE` event) | Compacting at the exact revision of a `DELETE` tombstone dropped the tombstone from the index, causing unsynced watchers catching up across the compaction boundary to silently miss the `DELETE`. | $\le$ `v3.4.0` | `v3.4.34`, `v3.5.16`, `v3.6.0` |
+| [#18089](https://github.com/etcd-io/etcd/issues/18089) / PR [#18274](https://github.com/etcd-io/etcd/pull/18274) (`1d0a6b397`) | **Reliable** (dropped `DELETE` event) | Compacting at the exact revision of a `DELETE` tombstone dropped the tombstone from the index, causing unsynced watchers catching up across the compaction boundary to silently miss the `DELETE`. | $\le$ `v3.4.0` | `v3.4.34`, `v3.5.16`, `v3.6.0` |
 | [#19179](https://github.com/etcd-io/etcd/issues/19179) / PR [#19188](https://github.com/etcd-io/etcd/pull/19188) (`83cf7bb4f`) | **Resumable** (dropped `DELETE` on crash/restore) | Same tombstone-at-compaction-revision loss triggered via member crash and `treeIndex` restore when a watch opened at the compaction revision. | $\le$ `v3.4` | `v3.4.36`, `v3.5.18`, `v3.6.0` |
 | [#19487](https://github.com/etcd-io/etcd/issues/19487) & [#20221](https://github.com/etcd-io/etcd/issues/20221) (`cf0369e4a`, `973847aa2`) | **Bookmarkable**, **Ordered**, **Unique**, **Reliable** | Future-revision watch on a lagging follower emitted stale `ProgressNotify` below `startRev` (rewinding `clientv3` `nextRev`) or lowered `w.minRev` on snapshot `Restore()` (§3.3). | $\le$ `v3.4` | `v3.5.22`, `v3.6.2`, `v3.7.0` |
 | [#20418](https://github.com/etcd-io/etcd/issues/20418) / PR [#21399](https://github.com/etcd-io/etcd/pull/21399) (`5944c74e3`) | Linearizable `ReadIndex` freshness check | `ReadIndex` retries reused the same request ID when a process paused, allowing a stale `ReadIndex` response to satisfy a later linearizable read (undermining KEP-2340's linearizable `Get` + `RequestProgress` check). | `v3.4.20`, `v3.5.0` | `v3.4.42`, `v3.5.28`, `v3.6.9`, `v3.7.0` |
-| [#20573](https://github.com/etcd-io/etcd/issues/20573) | **Resumable** (Antithesis snapshot-restore failure) | Antithesis deterministic simulation caught a `Resumable` violation involving snapshot restore in 2025; closed in Nov 2025 as stale without an identified root cause (**Moderate confidence**). | Unknown | **Unresolved / closed without root cause** |
-| Watch RBAC bypass (`afeaa624d`) | **Access Control** (`isWatchPermitted`) | `recvLoop` normalized `creq.RangeEnd = "\x00"` to `[]byte{}` *before* calling `sws.isWatchPermitted(creq)` (`server/etcdserver/api/v3rpc/watch.go:287-328 @ v3.7.3`), allowing a user with read permission on one key `K` to watch all keys $\ge K$. | $\le$ `v3.5` | `v3.5.33`, `v3.6.14`, `v3.7.1` |
+| [#20573](https://github.com/etcd-io/etcd/issues/20573) | **Resumable** (Antithesis snapshot-creation failure) | Antithesis deterministic simulation caught a `Resumable` violation right after local snapshot creation (`server.go:2137, 2182`) in 2025; manually closed in Nov 2025 (`"No failures for long time."`) without an identified root cause (**Moderate confidence**). | Unknown | **Unresolved / closed without root cause** |
+| Watch RBAC bypass (PR [#22596](https://github.com/etcd-io/etcd/pull/22596) / `afeaa624d`) | **Access Control** (`isWatchPermitted`) | `recvLoop` normalized `creq.RangeEnd = "\x00"` to `[]byte{}` *before* calling `sws.isWatchPermitted(creq)` (`server/etcdserver/api/v3rpc/watch.go:237-247, 287-318 @ v3.7.3`), allowing a user with read permission on one key `K` to watch all keys $\ge K$. | $\le$ `v3.5` | `v3.5.33`, `v3.6.14`, `v3.7.1` |
 
 ---
 
-## 4. Open Server, Proxy, and Protocol Bugs in `etcd v3.7.3`
+## 4. Unfixed Server, Proxy, and Protocol Defects in `etcd v3.7.3`
 
-Each of the following eight defects is present in `etcd v3.7.3` (`0a173d0410a9`)—and remains unfixed on `origin/main` as of `1573d5941`—and is verified directly against the source code.
+Each of the following nine defects across eight subsections is present in `etcd v3.7.3` (`0a173d0410a9`)—and remains unfixed on `origin/release-3.7` (`8e2ce34ca`) and `origin/main` (`6974f5223`)—and is verified directly against the source code (note that GitHub issues `#14303`, `#19710`, `#20716`, and `#22184`, as well as `#20242` in §3.3, were closed on GitHub without a server code fix).
 
 ### 4.1 Canceled Watch Events Retained in `sendLoop.pending` and Delivered to a Subsequent Watch or Leaked (`#22673`)
 
@@ -596,33 +619,36 @@ Each of the following eight defects is present in `etcd v3.7.3` (`0a173d0410a9`)
   3. When `sendLoop` receives a `Canceled` message on `ctrlStream`, it executes `delete(ids, wid)` and `continue` **without calling `delete(pending, wid)`**.
   4. Any events already queued in `watchStream.Chan()` for `wid` before `Cancel(wid)` completed—or events racing with `ctrlStream` in Go's `select`—arrive after `wid` has been removed from `ids`. Seeing `!okID`, `sendLoop` treats the canceled watch as "not yet registered" and appends its events to `pending[wid]`.
   5. If a client subsequently sends a `WatchCreateRequest` specifying `WatchId: wid` (explicitly allowed by `rpc.proto:809` and `watcher.go:102-136` once the prior `wid` is canceled), `sendLoop` receives the new `Created` message and flushes `pending[wid]` from the old watch onto the new watch.
-- **Code Evidence (`server/etcdserver/api/v3rpc/watch.go:470-478, 530-555 @ v3.7.3`):**
+- **Code Evidence (`server/etcdserver/api/v3rpc/watch.go:470-477, 530-554 @ v3.7.3`):**
   ```go
-  // Event channel branch (lines 470-478):
-  wid := wresp.WatchID
-  if _, okID := ids[wid]; !okID {
-      // buffer if watch not yet registered
-      wrs := append(pending[wid], wr)
-      pending[wid] = wrs
-      continue
+  // Event channel branch (lines 470-477):
+  if wresp.WatchID != clientv3.InvalidWatchID {
+  	if _, okID := ids[wresp.WatchID]; !okID {
+  		// buffer if id not yet announced
+  		wrs := append(pending[wresp.WatchID], wr)
+  		pending[wresp.WatchID] = wrs
+  		continue
+  	}
   }
 
-  // Control channel branch (lines 530-555):
+  // Control channel branch (lines 530-554):
   wid := mvcc.WatchID(c.WatchId)
+  ...
   if c.Canceled && wid != clientv3.InvalidWatchID {
-      delete(ids, wid)
-      continue
+  	delete(ids, wid)
+  	continue
   }
   if c.Created {
-      // flush buffered events
-      ids[wid] = struct{}{}
-      for _, v := range pending[wid] {
-          if err := sws.gRPCStream.Send(v); err != nil {
-              ...
-              return
-          }
-      }
-      delete(pending, wid)
+  	// flush buffered events
+  	ids[wid] = struct{}{}
+  	for _, v := range pending[wid] {
+  		mvcc.ReportEventReceived(len(v.Events))
+  		if err := sws.gRPCStream.Send(v); err != nil {
+  			...
+  			return
+  		}
+  	}
+  	delete(pending, wid)
   }
   ```
 
@@ -630,8 +656,8 @@ Each of the following eight defects is present in `etcd v3.7.3` (`0a173d0410a9`)
 
 ### 4.2 Storage-Layer Lock-Order Inversion in `progressIfSync` (`#22184`) and `EtcdServer.applyAll` Serialization (**Low confidence** on `compactBarrier` reachability)
 
-- **Summary:** Commit `973847aa2` (`#20229`, in `v3.7.3`) introduced a lock-order inversion in `watchableStore.progressIfSync()` by acquiring `watchableStore.mu.RLock()` *before* calling `s.rev()` (`store.mu.RLock()`), directly violating the documented lock hierarchy (`store.mu` before `watchableStore.mu`). However, auditing every `store.mu.Lock()` site in `server/` confirms that issue `#22184`'s claimed production trigger (`createMergedSnapshotMessage` calling `s.KV().Commit()` concurrently with `Write()`) does **not** occur in `EtcdServer` at `v3.7.3`, because `applyAll()` executes `Restore`, `Write`, `Compact`, and `Commit` sequentially on the single `s.applySched` FIFO goroutine.
-- **Promises Affected:** Latent storage-layer deadlock of `watchableStore.mu` and `store.mu` (which, if triggered by any caller outside `s.applySched`, freezes the Raft apply loop and all watches while `s.Leader()` remains non-zero).
+- **Summary:** Commit `973847aa2` (`#20229`, in `v3.7.3`) introduced a lock-order inversion in `watchableStore.progressIfSync()` by acquiring `watchableStore.mu.RLock()` *before* calling `s.rev()` (`store.mu.RLock()`), directly violating the documented lock hierarchy (`store.mu` before `watchableStore.mu`). However, auditing every `store.mu.Lock()` site in `server/` confirms that issue `#22184`'s claimed production trigger (`createMergedSnapshotMessage` calling `s.KV().Commit()` concurrently with `Write()`) does **not** occur in `EtcdServer` at `v3.7.3`, because `applyAll()` executes `Restore`, `Write`, `Compact`, and `Commit` sequentially on `(*EtcdServer).run()`'s single local `sched` (`schedule.NewFIFOScheduler`) goroutine.
+- **Promises Affected:** Latent storage-layer deadlock of `watchableStore.mu` and `store.mu` (which, if triggered by any caller outside `(*EtcdServer).run()`'s `sched` FIFO, freezes the Raft apply loop and all watches while `s.Leader()` remains non-zero).
 - **Step-by-Step Mechanism & Verification:**
   1. **The Documented Lock Hierarchy (`watchable_store.go:59-60`):** `watchableStore.mu` must never be acquired before `store.mu` (`kvstore.mu`).
   2. **Goroutine 1 (`watchableStoreTxnWrite.End()`):** `store.Write()` acquires `store.mu.RLock()`. At transaction end, `watchableStoreTxnWrite.End()` acquires `watchableStore.mu.Lock()` while still holding `store.mu.RLock()`:
@@ -639,10 +665,10 @@ Each of the following eight defects is present in `etcd v3.7.3` (`0a173d0410a9`)
   3. **Goroutine 2 (`progressIfSync()`):** Acquires `watchableStore.mu.RLock()` and then calls `s.rev()`, which calls `store.Read()` and acquires `store.mu.RLock()`:
      $$\text{holds } \texttt{watchableStore.mu.RLock()} \longrightarrow \text{waits for } \texttt{store.mu.RLock()}$$
   4. **Goroutine 3 (A concurrent `store.mu.Lock()` writer):** In Go's `sync.RWMutex`, a pending `Lock()` call on `store.mu` blocks behind Goroutine 1's `store.mu.RLock()` and simultaneously blocks new `RLock()` calls (Goroutine 2) from acquiring `store.mu.RLock()`, while Goroutine 1 blocks behind Goroutine 2's `watchableStore.mu.RLock()`.
-  5. **Why `EtcdServer` Does Not Hit This Today (`server.go:972-993, 2101-2105`):** Inside `EtcdServer`, `applyAll()` runs on the single `s.applySched` FIFO goroutine (`server.go:844`). Within `applyAll()`, `s.applySnapshot()` (`Restore`), `s.applyEntries()` (`Write` and `Compact`), `s.snapshotIfNeededAndCompactRaftLog()` (`Commit`), and `s.createMergedSnapshotMessage()` (`Commit`) all execute **sequentially on that single goroutine** (`server.go:2103`: `// So KV().Commit() cannot run in parallel with toApply`). The only other `store.mu.Lock()` site is `compactBarrier` (`kvstore.go:146`), which runs on `s.fifoSched` only when a compaction was interrupted prior to completion (**Low confidence** on hitting the 3-goroutine cycle via `compactBarrier` in production). Thus the bug is a confirmed storage-layer (`mvcc`) defect and a latent trap if any future refactor moves `Commit()` or `Compact()` off `s.applySched`.
+  5. **Why `EtcdServer` Does Not Hit This Today (`server.go:764, 844-845, 972-993, 2101-2105`):** Inside `(*EtcdServer).run()`, `applyAll()` is scheduled onto a single local `sched := schedule.NewFIFOScheduler(lg)` goroutine (`server.go:764, 844-845`). Within `applyAll()`, `s.applySnapshot()` (`Restore`), `s.applyEntries()` (`Write` and `Compact`), `s.snapshotIfNeededAndCompactRaftLog()` (`Commit`), and `s.createMergedSnapshotMessage()` (`Commit`) all execute **sequentially on that single goroutine** (`server.go:2103`: `// So KV().Commit() cannot run in parallel with toApply`). The only other `store.mu.Lock()` site is `compactBarrier` (`kvstore.go:146`), which runs on `s.fifoSched` only when a compaction was interrupted prior to completion (**Low confidence** on hitting the 3-goroutine cycle via `compactBarrier` in production). Thus the bug is a confirmed storage-layer (`mvcc`) defect and a latent trap if any future refactor moves `Commit()` or `Compact()` off that `sched` FIFO.
 - **Code References (`v3.7.3`):**
-  - Lock invariant & inversion: `server/storage/mvcc/watchable_store.go:59-60, 515-520`, `server/storage/mvcc/watchable_store_txn.go:43-46`, `server/storage/mvcc/kv_view.go:32`, `server/storage/mvcc/kvstore_txn.go:30, 46, 174`, `server/storage/mvcc/kvstore.go:146, 283, 297, 303`.
-  - `applyAll` FIFO serialization: `server/etcdserver/server.go:844, 972-993, 1062-1069, 2101-2105`, `server/etcdserver/snapshot_merge.go:38`, `server/etcdserver/apply/backend.go:73`.
+  - Lock invariant & inversion: `server/storage/mvcc/watchable_store.go:59-60, 515-520`, `server/storage/mvcc/watchable_store_txn.go:43-46`, `server/storage/mvcc/kv_view.go:32`, `server/storage/mvcc/kvstore_txn.go:31, 46, 161, 174, 209`, `server/storage/mvcc/kvstore.go:146, 283, 297, 303`.
+  - `applyAll` FIFO serialization: `server/etcdserver/server.go:764, 844-845, 972-993, 1062-1069, 2101-2105`, `server/etcdserver/snapshot_merge.go:38`, `server/etcdserver/apply/backend.go:73`.
 
 ---
 
@@ -651,18 +677,17 @@ Each of the following eight defects is present in `etcd v3.7.3` (`0a173d0410a9`)
 - **Summary:** Every 100 ms, `syncWatchers()` acquires the exclusive `watchableStore.mu.Lock()`—blocking every Raft write commit in `watchableStoreTxnWrite.End()`—and scans `bbolt` from `minRev` all the way to `curRev + 1`, even though `eventBatch.add()` stops accepting events after `watchBatchMaxRevs = 1000` revisions.
 - **Promises Affected:** Watch catch-up throughput and Raft apply-loop latency; triggers cascading watch victim overflow (`s.victims`).
 - **Step-by-Step Mechanism:**
-  1. `syncWatchers()` acquires `s.mu.Lock()` (`watchable_store.go:347`), selects up to `maxWatchersPerSync = 512` watchers from `s.unsynced`, and finds the minimum `minRev` across them (`lines 359-360`).
-  2. It calls `s.store.rangeEvents(minRev, curRev+1, wg)` (`line 366`), which scans every revision in `bbolt` in `[minRev, curRev+1)` and unmarshals the `mvccpb.KeyValue` protobuf for every matching key (`lines 419-442`).
-  3. As `rangeEvents` feeds events into `evs.add(ev)`, `eventBatch.add()` caps each batch at `watchBatchMaxRevs = 1000` distinct revisions and sets `eb.moreRev = evRev` (`watcher_group.go:53-60`).
-  4. Despite the batch being full after 1,000 revisions, `rangeEvents` has no early exit and continues scanning and unmarshaling all the way to `curRev + 1`.
+  1. `syncWatchers()` acquires `s.mu.Lock()` (`watchable_store.go:347`), selects up to `maxWatchersPerSync = 512` watchers from `s.unsynced`, and determines `minRev` (`lines 360-363`).
+  2. It calls `rangeEvents(s.store.lg, s.store.b, minRev, curRev+1, wg)` (`line 364`), which scans every `bbolt` entry in `[minRev, curRev+1)` (`lines 417-437`) and passes them to `kvsToEvents` (`lines 444-464`), unmarshaling the `mvccpb.KeyValue` protobuf (`line 447`) for **every** key in `[minRev, curRev+1)` before filtering by `c.contains(string(kv.Key))` (`line 451`).
+  3. As `kvsToEvents` feeds matching events into `evs.add(ev)`, `eventBatch.add()` caps each batch at `watchBatchMaxRevs = 1000` distinct revisions and sets `eb.moreRev = evRev` (`watcher_group.go:53-61`).
+  4. Despite the batch being full after 1,000 revisions, `rangeEvents` / `kvsToEvents` have no early exit and continue scanning and unmarshaling all the way to `curRev + 1`.
   5. A watcher reconnecting 500,000 revisions behind `curRev` forces `syncWatchers()` to scan 500,000 revisions under `s.mu.Lock()` to deliver 1,000, then 499,000 revisions on the next tick to deliver the next 1,000—performing $\mathcal{O}(N^2)$ bbolt work ($1.25 \times 10^8$ revision visits) while holding the exclusive lock that blocks the Raft apply loop (**Moderate confidence** on exact wall-clock stall duration on target hardware).
-- **Code Evidence (`server/storage/mvcc/watchable_store.go:346-414`, `watcher_group.go:28, 53-60 @ v3.7.3`):**
+- **Code Evidence (`server/storage/mvcc/watchable_store.go:346-464`, `watcher_group.go:28, 53-61 @ v3.7.3`):**
   ```go
-  // watcher_group.go:53-60 @ v3.7.3
+  // watcher_group.go:57-60 @ v3.7.3
   if eb.revs > watchBatchMaxRevs {
-      // max revisions exceeded
-      eb.moreRev = evRev
-      return
+  	eb.moreRev = evRev
+  	return
   }
   ```
 
@@ -670,13 +695,13 @@ Each of the following eight defects is present in `etcd v3.7.3` (`0a173d0410a9`)
 
 ### 4.4 Compacted Watchers Leaked in `s.unsynced` When $\ge 512$ Watchers Are Unsynced (`#22294`)
 
-- **Summary:** When `len(s.unsynced.watchers) >= 512` (e.g., immediately after a follower with $\ge 512$ active watches restores a leader snapshot), `watcherGroup.choose()` copies 512 watchers into a temporary `ret` group and calls `ret.chooseAll()`. For any compacted watcher (`w.minRev < compactRev`), `ret.chooseAll()` deletes `w` from the temporary `ret` copy rather than from `s.unsynced`, trapping `w` in `s.unsynced` forever.
-- **Promises Violated:** **Unique** cancellation (`CompactRevision` response sent repeatedly every 100 ms), **Bookmarkable** liveness (`len(s.unsynced.watchers) > 0` permanently disables `RequestProgress` across the entire server per §3.3), and bounded CPU/memory.
+- **Summary:** When `len(s.unsynced.watchers) >= 512` (e.g., immediately after a follower with $\ge 512$ active watches restores a leader snapshot), `watcherGroup.choose()` copies 512 watchers into a temporary `ret` group and calls `ret.chooseAll()`. For any compacted watcher (`w.minRev < compactRev`), `ret.chooseAll()` deletes `w` from the temporary `ret` copy rather than from `s.unsynced`, trapping `w` in `s.unsynced` until the client explicitly cancels the watch or closes the gRPC stream.
+- **Promises Violated:** **Unique** cancellation (`CompactRevision` response sent repeatedly every 100 ms), **Bookmarkable** liveness (`w` absent from `s.synced` suppresses `WatchProgressRequest` on that watcher's `watchStream` per §3.3), and bounded CPU/memory.
 - **Step-by-Step Mechanism:**
   1. When `len(s.unsynced.watchers) >= maxWatchersPerSync` (`512`), `s.unsynced.choose()` allocates a new temporary `ret := newWatcherGroup()`, copies 512 watchers into `ret`, and calls `ret.chooseAll(curRev, compactRev)`.
   2. Inside `ret.chooseAll()`, any watcher `w` with `w.minRev < compactRev` receives `WatchResponse{WatchID: w.id, CompactRevision: compactRev}` on `w.ch`, and `ret.chooseAll()` calls `wg.delete(w)`—which deletes `w` from **`ret`**, not from `s.unsynced`.
   3. Because `w` was removed from `ret`, when `syncWatchers()` later iterates over `wg` (`ret`) at `watchable_store.go:368, 403` to remove processed watchers from `s.unsynced`, `w` is not in `ret`, so `s.unsynced.delete(w)` is never called either.
-  4. Furthermore, when `sendLoop` (`v3rpc/watch.go:492`) sends the `CompactRevision` response to the client, it only executes `delete(ids, wid)` without calling `sws.watchStream.Cancel(wid)`. Unless the client tears down the entire gRPC stream or sends an explicit `WatchCancelRequest`, `w` stays in `s.unsynced` forever, emitting duplicate `CompactRevision` responses every 100 ms (which `sendLoop` buffers infinitely in `pending[wid]` per §4.1).
+  4. Furthermore, when `sendLoop` (`v3rpc/watch.go:459-491`) receives the `CompactRevision` response from `watchStream.Chan()` and sends it over `sws.gRPCStream.Send(wr)`, it neither removes `wid` from `ids` (`delete(ids, wid)` only runs on `ctrlStream` at `:535`) nor calls `sws.watchStream.Cancel(wid)`. While Go `clientv3` mitigates the duration of the leak once the caller consumes the first `CompactRevision` response (closing the stream or sending `WatchCancelRequest` at `client/v3/watch.go:689-703`, which calls `s.unsynced.delete(wa)` at `watchable_store.go:164`), any slow consumer or raw-gRPC client that does not cancel `wid` or close the stream leaves `w` in `s.unsynced` indefinitely, emitting duplicate `CompactRevision` responses over the gRPC wire every 100 ms.
 - **Code Evidence (`server/storage/mvcc/watcher_group.go:226-269 @ v3.7.3`):**
   ```go
   func (wg *watcherGroup) choose(maxWatchers int, curRev, compactRev int64) (*watcherGroup, int64) {
@@ -714,24 +739,30 @@ Each of the following eight defects is present in `etcd v3.7.3` (`0a173d0410a9`)
 
 ### 4.5 Silent Omission of `PrevKv` When Compaction Races With `sendLoop` (`#10681`)
 
-- **Summary:** `WithPrevKV()` does not attach `PrevKv` when an event is created during transaction commit; instead, `sendLoop` looks up `ModRevision - 1` lazily right before sending the event on the gRPC wire and silently ignores `mvcc.ErrCompacted`.
-- **Promises Violated:** **`WithPrevKV()` accuracy** (delivers update `PUT` and `DELETE` events with `PrevKv == nil` instead of canceling the watch with `ErrCompacted`, causing `kube-apiserver` errors in `kubernetes/kubernetes#76624` and `#123448`).
+- **Summary:** `WithPrevKV()` does not attach `PrevKv` when an event is created during transaction commit; instead, `sendLoop` looks up `ModRevision - 1` lazily right before sending the event on the gRPC wire and silently ignores `mvcc.ErrCompacted` (a behavior documented in `api/etcdserverpb/rpc.proto:806`—*"If the previous KV is already compacted, nothing will be returned"*—that creates a severe contract hazard for consumers relying on `PrevKv`).
+- **Promises Affected:** **`WithPrevKV()` completeness** (delivers update `PUT` and `DELETE` events with `PrevKv == nil` instead of canceling the watch with `ErrCompacted`, causing `kube-apiserver` errors in `kubernetes/kubernetes#76624` and `#123448`).
 - **Step-by-Step Mechanism:**
   1. Suppose key `K` was created at revision `10`, updated or deleted at revision `100`, and the store is compacted at revision `90` (or at `100` while revision `100` is queued in `w.ch` or `s.victims`, or while `syncWatchers` catches up from revision `95`).
   2. Because `w.minRev` (`95` or `100`) is $\ge$ `compactRev` (`90`), `syncWatchers` does not cancel the watch.
-  3. When `sendLoop` calls `sws.watchable.Range(K, nil, RangeOptions{Rev: 99})`, `Range` returns `mvcc.ErrCompacted`.
+  3. When `sendLoop` calls `sws.watchable.Range(context.TODO(), evs[i].Kv.Key, nil, mvcc.RangeOptions{Rev: 99})`, `Range` returns `mvcc.ErrCompacted`.
   4. `sendLoop` ignores `err != nil` and sends the event with `PrevKv: nil`.
-- **Code Evidence (`server/etcdserver/api/v3rpc/watch.go:445-460 @ v3.7.3`):**
+- **Code Evidence (`server/etcdserver/api/v3rpc/watch.go:443-457 @ v3.7.3`):**
   ```go
   evs := wresp.Events
+  events := make([]*mvccpb.Event, len(evs))
+  sws.mu.RLock()
+  needPrevKV := sws.prevKV[wresp.WatchID]
+  sws.mu.RUnlock()
   for i := range evs {
-      if sws.prevKV[wresp.WatchID] && !evs[i].IsCreate() {
-          opt := mvcc.RangeOptions{Rev: evs[i].Kv.ModRevision - 1}
-          r, err := sws.watchable.Range(evs[i].Kv.Key, nil, opt)
-          if err == nil && len(r.KVs) != 0 {
-              evs[i].PrevKv = &(r.KVs[0])
-          }
-      }
+  	events[i] = evs[i]
+  	if needPrevKV && !IsCreateEvent(evs[i]) {
+  		opt := mvcc.RangeOptions{Rev: evs[i].Kv.ModRevision - 1}
+  		r, err := sws.watchable.Range(context.TODO(), evs[i].Kv.Key, nil, opt)
+  		if err == nil && len(r.KVs) != 0 {
+  			events[i].PrevKv = r.KVs[0]
+  		}
+  	}
+  }
   ```
 
 ---
@@ -780,11 +811,11 @@ Two official etcd watch-multiplexing and caching packages contain severe livenes
 - **Summary:** Because `clientv3` multiplexes all watches with identical context metadata onto a single `watchGRPCStream`, cancelling a burst of watches ($> 16$) while events or control responses are in flight creates a 4-goroutine cyclic deadlock between `clientv3` and `serverWatchStream` that freezes every watch on the stream.
 - **Promises Affected:** Stream liveness for all active and newly created watches sharing that `watchGRPCStream`.
 - **The 4-Goroutine Deadlock Cycle:**
-  1. **Client `watchGRPCStream.run()` (`client/v3/watch.go:685-706`):** Single-goroutine `select` loop that both reads incoming responses from `w.respc` (`line 548`) and sends `WatchCancelRequest` synchronously via `wc.Send(req)` inside `case ws := <-w.closingc:` (`line 703`). When TCP/HTTP2 send buffers fill, `run()` blocks inside `wc.Send(req)` and stops draining `w.respc`.
-  2. **Client `serveWatchClient()` (`client/v3/watch.go:770-790`):** Reads from `wc.Recv()` and writes to **unbuffered** `w.respc <- wresp` (`lines 258, 789`). Because `run()` is blocked in `wc.Send()`, `serveWatchClient()` blocks on `w.respc <- wresp` and stops calling `wc.Recv()`.
-  3. **Server `sendLoop()` (`server/etcdserver/api/v3rpc/watch.go:500, 519`):** Calls `sws.gRPCStream.Send(...)`. Once transport buffers fill (immediately on the 1-slot `chanStream` adapter at `adapter/chan_stream.go:145` in `#20716`, or when HTTP/2 flow-control windows fill in `#18879`), `sendLoop()` blocks in `Send()` and stops draining `sws.ctrlStream`.
-  4. **Server `recvLoop()` (`server/etcdserver/api/v3rpc/watch.go:367, 383`):** Reads `CancelRequest` from `sws.gRPCStream.Recv()` and writes the cancel response into `sws.ctrlStream` (capacity `ctrlStreamBufLen = 16`, `watch.go:42, 122`). On the 17th cancel response while `sendLoop()` is blocked, `recvLoop()` blocks at `sws.ctrlStream <- wr` (`line 383`) and stops calling `Recv()`, which blocks the client's `wc.Send(req)` forever.
-- **Code References (`v3.7.3`):** `client/v3/watch.go:255, 258, 343, 548, 685-706, 770-790`; `server/etcdserver/api/v3rpc/watch.go:42, 122, 367, 383, 500, 519`; `server/proxy/grpcproxy/adapter/chan_stream.go:107, 145`.
+  1. **Client `watchGRPCStream.run()` (`client/v3/watch.go:590, 685-706`):** Single-goroutine `select` loop that both reads incoming responses from `w.respc` (`line 590`) and sends `WatchCancelRequest` synchronously via `wc.Send(req)` inside `case ws := <-w.closingc:` (`line 703`). When TCP/HTTP2 send buffers fill, `run()` blocks inside `wc.Send(req)` and stops draining `w.respc`.
+  2. **Client `serveWatchClient()` (`client/v3/watch.go:770-786`):** Reads from `wc.Recv()` and writes to **unbuffered** `w.respc <- wresp` (`lines 291, 348, 781`). Because `run()` is blocked in `wc.Send()`, `serveWatchClient()` blocks on `w.respc <- wresp` and stops calling `wc.Recv()`.
+  3. **Server `sendLoop()` (`server/etcdserver/api/v3rpc/watch.go:488, 519`):** Calls `sws.gRPCStream.Send(...)`. Once transport buffers fill (immediately on the 1-slot `chanStream` adapter at `adapter/chan_stream.go:145` in `#20716`, or when HTTP/2 flow-control windows fill in `#18879`), `sendLoop()` blocks in `Send()` and stops draining `sws.ctrlStream`.
+  4. **Server `recvLoop()` (`server/etcdserver/api/v3rpc/watch.go:251, 371-388`):** Reads `CancelRequest` from `sws.gRPCStream.Recv()` (`line 251`) and writes the cancel response into `sws.ctrlStream` (capacity `ctrlStreamBufLen = 16`, `watch.go:124, 179`). On the 17th cancel response while `sendLoop()` is blocked, `recvLoop()` blocks at `sws.ctrlStream <- wr` (`line 383`) and stops calling `Recv()`, which blocks the client's `wc.Send(req)` forever.
+- **Code References (`v3.7.3`):** `client/v3/watch.go:290-291, 345, 348, 590, 685-706, 770-786`; `server/etcdserver/api/v3rpc/watch.go:124, 179, 251, 371-388, 488, 519`; `server/proxy/grpcproxy/adapter/chan_stream.go:107, 145`.
 
 ---
 
@@ -810,33 +841,40 @@ When `jetcd` opens (or resumes) a watch at an explicit historical revision `star
 
 #### Step-by-Step Trace (`WatchImpl.java @ jetcd-0.8.7`)
 1. Suppose a Java application opens a watch at `startRevision = 50` (e.g., after a `Get` at revision `49`, or while reconnecting a watch that had reached revision `49` before a leader failover) against an etcd member whose current revision is `100`.
-2. `WatcherImpl.resume()` (`WatchImpl.java:179-185`) sends `WatchCreateRequest { start_revision: 50 }`.
-3. On the server (`v3rpc/watch.go:340-366`), `watchStream.Watch(..., startRev=50)` places the watcher in `s.unsynced` with `minRev = 50` (to be caught up asynchronously by `syncWatchersLoop` every 100 ms in batches of up to 1,000 revisions) and **immediately sends `WatchResponse { Created: true, Header: { Revision: 100 } }` on `ctrlStream`**.
-4. Upon receiving `Created`, `jetcd`'s `processCreated()` (`WatchImpl.java:256-268`) executes line 267:
+2. `WatcherImpl.resume()` (`WatchImpl.java:141, 152-196`, specifically `.setStartRevision(this.revision)` at `:167`) sends `WatchCreateRequest { start_revision: 50 }`.
+3. On the server (`v3rpc/watch.go:340-366`), `watchStream.Watch(..., startRev=50)` places the watcher in `s.unsynced` with `minRev = 50` (to be caught up asynchronously by `syncWatchersLoop` $\to$ `syncWatchers` every 100 ms in batches of up to 1,000 revisions) and **immediately sends `WatchResponse { Created: true, Header: { Revision: 100 } }` on `ctrlStream`**.
+4. Upon receiving `Created`, `jetcd`'s `WatcherImpl.onNext(WatchResponse response)` (`WatchImpl.java:256-272`) executes line 267:
    ```java
    revision = Math.max(revision, response.getHeader().getRevision());
    ```
    **`this.revision` immediately jumps from `50` to `100` before any event in `[50..100]` has arrived.**
 5. **Two ways this loses events on disconnect:**
-   - *Disconnect before Batch 1 arrives:* If the stream breaks before the first `syncWatchersLoop` batch arrives, `resume()` reconnects with `start_revision = 100`, losing all events in `[50..99]`.
-   - *Disconnect during multi-batch catch-up (>1,000 revisions behind):* Even after Batch 1 arrives, `syncWatchersLoop` (`watchable_store.go:417`) stamps *every* catch-up batch's `Header.Revision` with the store's current tip (e.g., `5000`), while `processEvents()` (`WatchImpl.java:315`) sets `this.revision = lastEvent.getModRevision() + 1` (e.g., `1100`). If the stream disconnects after Batch 1, `resume()` sends `start_revision = 1100`, immediately receives `Created { Header.Revision: 5000 }` on the new stream (jumping `this.revision` to `5000` again!), and any second blip before Batch 2 arrives drops `[1100..4999]`.
+   - *Disconnect before Batch 1 arrives:* If the stream breaks before the first `syncWatchers` batch arrives, `resume()` reconnects with `start_revision = 100`, losing all events in `[50..99]`.
+   - *Disconnect during multi-batch catch-up (>1,000 revisions behind):* Even after Batch 1 arrives, `syncWatchers` (`watchable_store.go:392`) stamps *every* catch-up batch's `Revision` with the store's current tip `s.rev()` (e.g., `5000`), while `WatcherImpl.onNext`'s events branch (`WatchImpl.java:313-316`) sets `this.revision = lastEvent.getKv().getModRevision() + 1` (e.g., `1100`). If the stream disconnects after Batch 1, `resume()` sends `start_revision = 1100`, immediately receives `Created { Header.Revision: 5000 }` on the new stream (jumping `this.revision` to `5000` again!), and any second blip before Batch 2 arrives drops `[1100..4999]`.
 
 #### Historical Origin and Why Tests Missed It
-- **Origin (`jetcd#946`, commit `70be01a`, July 2021):** Originally, `processCreated` executed `revision = response.getHeader().getRevision()`. When `jetcd#946` reported that a future-revision watch (`revision > Header.Revision`) had its cursor lowered by `Created`, commit `70be01a` changed the line to `Math.max(revision, response.getHeader().getRevision())`—fixing future watches while leaving historical watches (`0 < revision < Header.Revision`) broken.
+- **Origin (`jetcd#946`, commit `70be01a`, July 2021):** Originally, `WatcherImpl.onNext`'s `Created` branch executed `revision = response.getHeader().getRevision()`. When `jetcd#946` reported that a future-revision watch (`revision > Header.Revision`) had its cursor lowered by `Created`, commit `70be01a` changed the line to `Math.max(revision, response.getHeader().getRevision())`—fixing future watches while leaving historical watches (`0 < revision < Header.Revision`) broken.
 - **Why Go `clientv3` is not affected for historical watches:** Go `clientv3` (`client/v3/watch.go:858 @ v3.7.3`) guards its `Created` assignment with `if ws.initReq.rev == 0 { nextRev = wr.Header.Revision }`, preserving `ws.initReq.rev` whenever an explicit starting revision was provided.
 - **Why `jetcd` tests missed it (`WatchResumeTest.java:37-69`, `Etcd.java:31 @ jetcd-0.8.7`):** `WatchResumeTest` only tests `watchClient.watch(key, ...)` with the default `startRevision == 0`, never testing reconnection of a watch started at $0 < R < \text{currentRev}$. Furthermore, `jetcd-launcher` (`Etcd.java:31`) runs against `quay.io/coreos/etcd:v3.5.14`, which predates the server-side watch fixes in `v3.5.16`, `v3.5.18`, and `v3.5.22`.
 
-- **Code Evidence (`jetcd-core/src/main/java/io/etcd/jetcd/impl/WatchImpl.java:175-185, 256-318 @ jetcd-0.8.7`):**
+- **Code Evidence (`jetcd-core/src/main/java/io/etcd/jetcd/impl/WatchImpl.java:164-168, 256-272 @ jetcd-0.8.7`; note `:262-265` also omits `this.close()`, leaving `closed == false` on `watchId == -1`):**
   ```java
-  private void processCreated(io.etcd.jetcd.api.WatchResponse response) {
-      ...
+  } else if (response.getCreated()) {
+
+      //
+      // Created
+      //
+
       if (response.getWatchId() == -1) {
-          listener.onError(newWatcherCreateException());
-          this.close();
+          listener.onError(newEtcdException(ErrorCode.INTERNAL, "etcd server failed to create watch id"));
           return;
       }
+
       revision = Math.max(revision, response.getHeader().getRevision());
-      watchId = response.getWatchId();
+      id = response.getWatchId();
+      if (option.isCreatedNotify()) {
+          listener.onNext(new io.etcd.jetcd.watch.WatchResponse(response));
+      }
   }
   ```
 
@@ -845,27 +883,29 @@ When `jetcd` opens (or resumes) a watch at an explicit historical revision `star
 ### 5.2 Additional State-Machine Defects in `jetcd` (`0.8.7`) and `clientv3` (`v3.7.3`)
 
 1. **`jetcd` Off-by-One Revision Update on `ProgressNotify` (`WatchImpl.java:291-313 @ jetcd-0.8.7`):**
-   When `jetcd` receives an empty `ProgressNotify` response (`response.getEventsCount() == 0`), it sets:
+   When `jetcd` receives an empty `ProgressNotify` response, `WatcherImpl.onNext` executes:
    ```java
-   if (response.getEventsCount() == 0 && this.option.isProgressNotify()) {
+   } else if (io.etcd.jetcd.watch.WatchResponse.isProgressNotify(response)) {
+       listener.onNext(new io.etcd.jetcd.watch.WatchResponse(response));
        revision = Math.max(revision, response.getHeader().getRevision());
-       listener.onNext(new WatchResponse(response));
-   } else if (response.getEventsCount() == 0) {
+   } else if (response.getEventsCount() == 0 && option.isProgressNotify()) {
+       ...
+       listener.onNext(new io.etcd.jetcd.watch.WatchResponse(response, namespace));
        revision = response.getHeader().getRevision();
    }
    ```
-   Because `start_revision` in `WatchCreateRequest` is **inclusive** (`rpc.proto:784`), a `ProgressNotify` at `Header.Revision = 100` means all events $\le 100$ have already been delivered, so the next watch must start at **`100 + 1 = 101`** (which Go `clientv3` does at `client/v3/watch.go:864` after commit `36fc3cae6`). By omitting `+ 1`, `jetcd` resumes at `100` after a disconnect and **re-delivers a duplicate event if a write occurred at revision `100`**, violating **Unique**. Furthermore, if `option.isProgressNotify()` is `false` (line 312), `revision = response.getHeader().getRevision()` lacks `Math.max` and can regress `this.revision` backwards.
+   Because `start_revision` in `WatchCreateRequest` is **inclusive** (`rpc.proto:784`), a `ProgressNotify` at `Header.Revision = 100` (`WatchResponse.isProgressNotify(response)` at `WatchResponse.java:88-91`, which matches whenever `eventsCount == 0 && !created && !canceled && compactRevision == 0 && header.revision != 0` regardless of `option.isProgressNotify()`) means all events $\le 100$ have already been delivered, so the next watch must start at **`100 + 1 = 101`** (which Go `clientv3` does at `client/v3/watch.go:864` after commit `36fc3cae6`). By omitting `+ 1`, `jetcd` resumes at `100` after a disconnect and **re-delivers a duplicate event if a write occurred at revision `100`**, violating **Unique**. Furthermore, if `option.isProgressNotify()` is `true` and an empty response arrives with `Header.Revision == 0` (so `WatchResponse.isProgressNotify(response)` returns `false`), the `else if` fallback at line `312` (`revision = response.getHeader().getRevision()`) lacks `Math.max` and overwrites `this.revision` back to `0`.
 2. **`jetcd` Uncaught Exception in `reschedule()` Leaves Watcher Permanently Dead (`WatchImpl.java:357-368 @ jetcd-0.8.7`, `jetcd#1227`):**
    When a stream disconnects with a retryable status, `reschedule()` schedules `this::resume` after 500 ms. If `this::resume` throws any synchronous runtime exception, `Futures.addCallback`'s `onFailure` handler (`lines 362-366`) only logs `LOG.warn("scheduled resume failed", t)` without calling `reschedule()`, `listener.onError(t)`, or `close()`, leaving `WatcherImpl` open (`closed == false`) but permanently dead.
 3. **`jetcd` Missing Watch Fragmentation Support (`WatchImpl.java:164-185 @ jetcd-0.8.7`):**
    `WatcherImpl.resume()` never calls `.setFragment(...)` on `WatchCreateRequest.Builder`, so large multi-key transactions or catch-up batches cannot be fragmented across responses.
 4. **Go `clientv3` Unbounded Per-Substream Memory Buffer (`client/v3/watch.go:818-885 @ v3.7.3`):**
    In `clientv3`, `serveSubstream` appends incoming responses to an **unbounded** slice `ws.buf = append(ws.buf, wr)` whenever the caller has not drained the 1-slot `ws.outc` channel, allowing a single slow consumer to grow client heap memory without bound.
-5. **Post-`0.8.7` Changes in `jetcd-0.8.8` (`origin/main`) (`#1616`, `#1631`, `525794a7c`):**
-   Checking `jetcd-0.8.8` (`a2909b821`) confirms that all `WatchImpl.java` cursor and resumption defects (`:267, 293, 312, 354, 362`) remain unfixed, while three adjacent changes landed after `0.8.7`:
-   - **Channel reconnect backoff reset ([#1616](https://github.com/etcd-io/jetcd/issues/1616) / PR [#1617](https://github.com/etcd-io/jetcd/pull/1617), `dc4fc009c`):** In `jetcd-0.8.7`, while `grpc-java`'s managed channel was in exponential reconnect backoff (up to 2 minutes), retry attempts on `Status.UNAVAILABLE` failed immediately without attempting a TCP connection; `dc4fc009c` calls `connectionManager.getChannel().resetConnectBackoff()` before retrying `UNAVAILABLE`.
-   - **`Observers.Builder` callback mutability fix (PR [#1631](https://github.com/etcd-io/jetcd/pull/1631), `b4ccc3dea`):** Fixed a bug where reusing an `Observers.Builder` instance mutated already-built `StreamObserver` callbacks.
-   - **Member-switching watch header documentation (`525794a7c`):** Added tests and documentation noting that `WatchResponse` headers on a single logical `Watcher` can bear different `member_id` values after a reconnect switches to another cluster member.
+5. **Post-`0.8.7` Changes in `jetcd-0.8.8` (`origin/main`) (`#1616`, `#1631`) and Pre-`0.8.7` Multi-Stream Note (`525794a7c`):**
+   Checking `jetcd-0.8.8` (`a2909b838`) confirms that all `WatchImpl.java` cursor and resumption defects (`:267, 293, 312, 354, 362`) remain unfixed, while two adjacent watch/transport fixes landed after `0.8.7` (in addition to `525794a7c` already in `0.8.7`):
+   - **Channel reconnect backoff reset ([#1616](https://github.com/etcd-io/jetcd/issues/1616) / PR [#1617](https://github.com/etcd-io/jetcd/pull/1617), `dc4fc009c`, in `jetcd-0.8.8`):** In `jetcd-0.8.7`, while `grpc-java`'s managed channel was in exponential reconnect backoff (up to 2 minutes), retry attempts on `Status.UNAVAILABLE` failed immediately without attempting a TCP connection; `dc4fc009c` calls `connectionManager.getChannel().resetConnectBackoff()` before retrying `UNAVAILABLE`.
+   - **`Observers.Builder` callback mutability fix ([#1631](https://github.com/etcd-io/jetcd/issues/1631) / PR [#1632](https://github.com/etcd-io/jetcd/pull/1632), `b4ccc3dea`, in `jetcd-0.8.8`):** Fixed a bug where reusing an `Observers.Builder` instance mutated already-built `StreamObserver` callbacks.
+   - **Multi-watcher member-header documentation (`525794a7c`, in `jetcd-0.8.7`):** Documented (`docs/Watch.md`, `WatchTest.java`) that parallel `Watcher` instances on a multi-endpoint `jetcd` client open separate gRPC `Watch` streams and can therefore receive different `ResponseHeader.member_id` values for the same revision.
 
 ---
 
@@ -873,14 +913,14 @@ When `jetcd` opens (or resumes) a watch at an explicit historical revision `star
 
 | Dimension / Behavior | Go `clientv3` (`v3.7.3`) | Java `jetcd` (`jetcd-0.8.7`) |
 |---|---|---|
-| **Stream Multiplexing** | Multiplexes all watches with identical `streamKeyFromCtx(ctx)` onto 1 `watchGRPCStream` (`watch.go:1086-1091`); 1 burst cancellation (`#18879`) stalls all watches on that stream. | Opens 1 dedicated gRPC `Watch` stream per `WatcherImpl` (`WatchImpl.java:186-194`). |
-| **`WithRequireLeader` Default** | Off by default (`client/v3/ctx.go:39`). | Off by default (`requireLeader = false`, `WatchOption.java:154`). |
+| **Stream Multiplexing** | Multiplexes all watches with identical `streamKeyFromCtx(ctx)` onto 1 `watchGRPCStream` (`watch.go:1086-1091`); 1 burst cancellation (`#18879`) or unsynced watcher (`#20242`) affects all watches on that stream. | Opens 1 dedicated gRPC `Watch` stream per `WatcherImpl` (`WatchImpl.java:186-194`). |
+| **`WithRequireLeader` Default** | Off by default (`client/v3/ctx.go:28-38`). | Off by default (`requireLeader = false`, `WatchOption.java:154`). |
 | **HTTP/2 Keepalive Default** | **Off by default** (`DialKeepAliveTime == 0`, `client.go:231-236`); hangs forever on `SIGSTOP`/black-holed member unless configured. | **On by default** (`keepaliveTime = 30s`, `keepaliveTimeout = 10s`, `keepaliveWithoutCalls = true`, `ClientBuilder.java:66-68`). |
 | **Resume Cursor After `Created`** | Sets `nextRev = wr.Header.Revision` (missing `+ 1`) **only when `ws.initReq.rev == 0`** (`watch.go:858-860`). Preserves `ws.initReq.rev` for explicit-revision watches. | Sets `revision = Math.max(revision, response.getHeader().getRevision())` on **all** watches (`WatchImpl.java:267`), **silently skipping `[startRev, Header.Revision)` on reconnect**. |
-| **Resume Cursor After `ProgressNotify`** | Correctly sets `nextRev = wr.Header.Revision + 1` (`watch.go:864`). | **Off-by-one bug:** sets `revision = Math.max(revision, Header.Revision)` (`WatchImpl.java:293`) or `revision = Header.Revision` (`line 312`) without `+ 1`, replaying revision `Header.Revision` on reconnect. |
+| **Resume Cursor After `ProgressNotify`** | Correctly sets `nextRev = wr.Header.Revision + 1` (`watch.go:864`). | **Off-by-one bug:** sets `revision = Math.max(revision, Header.Revision)` (`WatchImpl.java:293`) without `+ 1` (replaying `Header.Revision` on reconnect), or `revision = Header.Revision` (`line 312`, resetting `this.revision = 0` if `option.isProgressNotify()` is `true` and `Header.Revision == 0`). |
 | **Behavior on `ErrNoLeader`** | Overrides `isHaltErr` to terminally close all substreams (`watch.go:667`), discards `ws.buf` (`line 835`), emits `Header.Revision = 0` (`line 495`), and drops `ErrNoLeader` if `ws.outc` is full for $> 250\text{ ms}$ (`line 478`). | Treats `Errors.isNoLeaderError(status)` as fatal (`WatchImpl.java:354`), calls `listener.onError()`, and permanently closes the watcher (`#1352`). |
 | **Behavior on Transient Disconnect / Unreachable Cluster** | Silently retries in background forever (`watch.go:85-91, 1039`) with no error surfaced to caller. | Calls `listener.onError()` on each failure and schedules `this::resume` after `500ms` (`WatchImpl.java:334, 347, 358`). If `resume()` throws, logs a warning and abandons the watcher (`#1227`). |
-| **Fragmentation & Buffering** | Supports `WithFragment()` (`watch.go:590`); buffers unread responses in an unbounded slice `ws.buf` (`watch.go:879-880`). | Does not support `WithFragment()` (`WatchImpl.java:164-185`). |
+| **Fragmentation & Buffering** | Supports `WithFragment()` (`client/v3/op.go:555-557`, `watch.go:593-598`); buffers unread responses in an unbounded slice `ws.buf` (`watch.go:879-880`). | Does not support `WithFragment()` (`WatchImpl.java:164-185`). |
 
 ---
 
@@ -889,16 +929,16 @@ When `jetcd` opens (or resumes) a watch at an explicit historical revision `star
 Kubernetes uses etcd Watch as the foundation of `kube-apiserver`'s `cacher` / `watchCache`. Inspecting the Kubernetes `v1.37.2` storage layer (`staging/src/k8s.io/apiserver/pkg/storage/{etcd3,cacher,storagebackend}/`) shows how Kubernetes has had to build explicit application-level workarounds for etcd's watch failure modes—and where residual hazards remain:
 
 1. **Mandatory `WithRequireLeader`, HTTP/2 Keepalives, and Matching `RequestProgress` Context:**
-   - To prevent watches from hanging forever on partitioned or paused etcd members (`#89488`, `#8980`), `kube-apiserver` wraps every watch context in `clientv3.WithRequireLeader(ctx)` (`store.go:1156-1165`, PR `#89881`) and configures gRPC keepalives to `30s` / `10s` (`factory/etcd3.go:63-64`).
-   - To avoid Failure #6 (`#12254`, where `RequestProgress` without `WithRequireLeader` targets an empty gRPC stream), `kube-apiserver` saves `s.watchContext` and passes it to `RequestProgress(s.watchContext)` (`store.go:102-106`).
+   - To prevent watches from hanging forever on partitioned or paused etcd members (`#89488`, `#8980`), `kube-apiserver` wraps every watch context in `clientv3.WithRequireLeader(ctx)` via its `s.watchContext(ctx)` helper (`store.go:1156-1165`, PR `#89881`) and configures gRPC keepalives to `30s` / `10s` (`factory/etcd3.go:63-64`).
+   - To avoid Failure #6 (`#12254`, where `RequestProgress` without `WithRequireLeader` targets an empty gRPC stream), `kube-apiserver` passes `s.watchContext(ctx)` to `s.client.KV.RequestProgress(s.watchContext(ctx))` (`store.go:102-106`).
    - **Operational cost (`kubernetes/kubernetes#111116`):** Because `clientv3` treats `ErrNoLeader` as fatal (Failure #1) and `newStreamInterceptor` gives zero grace period to reconnecting streams during an election (Failure #9), any etcd election or leader crash that hits `ErrGRPCNoLeader` forces `kube-apiserver` reflectors to tear down and re-list across the cluster.
 2. **Explicit `WithRev(initialRev + 1)`, Bare-Channel-Close Handling, and `PrevKv == nil` Rejection:**
    - `kube-apiserver` never uses `startRev == 0` for its cacher reflectors; it lists at `initialRev` and watches at `WithRev(initialRev + 1)` with `WithPrevKV()` (`watcher.go:470-477`), avoiding Failure #2 and the `startRev == 0` `Created` race (§3.2).
-   - When `for wres := range wch` exits (`watcher.go:521`), `kube-apiserver` closes `watchClosedCh` (`watcher.go:269`) and triggers a reflector relist (`cacher.go:503`) even if `clientv3`'s 250 ms `sendCloseSubstream` timeout dropped the `Canceled: true` error response (Failure #4).
-   - When etcd bug `#10681` (§4.5) delivers a non-create event with `PrevKv == nil` due to compaction, `parseEvent` (`event.go:64-67`) returns an explicit error (`"kv is nil in delete event"`), aborting the watch and forcing a relist rather than corrupting `watchCache` (`kubernetes/kubernetes#76624`, `#123448`).
+   - When `for wres := range wch` exits (`watcher.go:521`), `kube-apiserver` closes `watchClosedCh` (`watcher.go:526`, selected on at `:269-272`) and triggers a reflector relist (`cacher.go:503`) even if `clientv3`'s 250 ms `sendCloseSubstream` timeout dropped the `Canceled: true` error response (Failure #4).
+   - When etcd bug `#10681` (§4.5) delivers a non-create event with `PrevKv == nil` due to compaction, `parseEvent` (`event.go:64-67`, `notFoundPrevKVError` at `:95-97`) returns an explicit error (`"etcd event received with PrevKv=nil (key=%q, modRevision=%d, type=%s)"`), aborting the watch and forcing a relist rather than corrupting `watchCache` (`kubernetes/kubernetes#76624`, `#123448`).
 3. **Why Kubernetes Could Not Trust `RequestProgress` Alone for Consistent Cached Reads (`KEP-2340`):**
    - Because etcd's `RequestProgress()` bypasses Raft `ReadIndex` and returns the watch-serving member's unfenced local revision (§1.2), Kubernetes could not implement `ConsistentReadsFromCache` (KEP-2340) using `RequestProgress()` alone.
-   - Instead, `kube-apiserver` first issues a linearizable `KV.Get(ctx, prefix, WithCountOnly(), WithLimit(1))` (`store.go:728-745`, `tests/robustness/traffic/kubernetes.go:118-137 @ v3.7.3`) solely to force a Raft `ReadIndex` and obtain the cluster's true revision $R_{\text{linearizable}}$. If `watchCache` is behind $R_{\text{linearizable}}$, `ConditionalProgressRequester` polls `RequestProgress` every `100ms` (`watch_progress.go:36, 83-115`) for up to `3s` (`watch_cache.go:49, 318-360`), falling back to a direct etcd read (`delegator.go:160-172`) if the watch stream fails to catch up (e.g., due to `#20242` progress starvation in §3.3 or `#22264` `syncWatchers` stalls in §4.3).
+   - Instead, `kube-apiserver`'s `GetCurrentResourceVersion` (`store.go:728-745`) first issues a linearizable `s.client.Kubernetes.Get(ctx, preparedKey, kubernetes.GetOptions{})` (`client/v3/kubernetes/client.go:47-48 @ v3.7.3`: `k.KV.Get(ctx, key, clientv3.WithRev(opts.Revision), clientv3.WithLimit(1))`) solely to force a Raft `ReadIndex` and obtain the cluster's true revision $R_{\text{linearizable}}$. If `watchCache` is behind $R_{\text{linearizable}}$, `ConditionalProgressRequester` polls `RequestProgress` every `100ms` (`cacher/progress/watch_progress.go:36, 83-115`) for up to `3s` (`watch_cache.go:49, 318-360`), falling back to a direct etcd read (`delegator.go:160-172`) if the watch stream fails to catch up (e.g., due to `#20242` stream-wide progress starvation on multiplexed `clientv3` streams in §3.3 or `#22264` `syncWatchers` stalls in §4.3).
 4. **Unresolved `resourceVersion=0` Staleness Hazard (`watch_cache.go:333-339`, `kubernetes/kubernetes#59848`):**
    - For reads with `resourceVersion="0"`, `watch_cache.go:333-339` bypasses the KEP-2340 freshness check (`// In case resourceVersion is 0, we accept arbitrarily stale result`). During the 3–5 s window before `WithRequireLeader` cancels a partitioned stream—or indefinitely during an apply-loop stall where `s.Leader() != raft.None`—`watchCache` serves arbitrarily stale objects to `resourceVersion=0` callers (`kubernetes/kubernetes#59848`).
 
@@ -906,15 +946,15 @@ Kubernetes uses etcd Watch as the foundation of `kube-apiserver`'s `cacher` / `w
 
 ## 7. Architectural Comparison with Google's Chubby
 
-Comparing etcd's Watch subsystem with Google's Chubby lock service (`doc/chubby-osdi06.md`, §2.5, §2.7–§2.9, §4.5–§4.6) highlights how the two systems make opposite trade-offs between **event continuity across failover** and **session-fenced cache freshness**:
+Comparing etcd's Watch subsystem with Google's Chubby lock service (`doc/chubby-osdi06.md:161-175, 227-310, 516-534`, §2.5, §2.7–§2.9, §4.5–§4.6) highlights how the two systems make opposite trade-offs between **event continuity across failover** and **session-fenced cache freshness**:
 
 | Design Dimension | Chubby (`doc/chubby-osdi06.md`) | etcd (`v3.7.3` / `jetcd-0.8.7`) |
 |---|---|---|
-| **Primary Client Cache Consistency Mechanism** | **Master-driven blocking cache invalidations** piggybacked on Master-bound Session KeepAlives (§2.7–§2.8, pp. 6–8). Before committing a write, the Chubby master blocks the write until every client caching that file/directory acknowledges invalidation on its KeepAlive reply or its session lease expires. | **Asynchronous MVCC Watch streams** (`Watch` RPC). Writers never block on watchers; watchers stream asynchronously from any replica's MVCC history (`[compactMainRev, currentRev]`). |
-| **Role of Events (`Watch`)** | **Advisory, best-effort hints** (§2.5, p. 5; §4.5, pp. 13–14). Burrows explicitly notes that Chubby avoided using events as a general publish/subscribe replication log. | **Primary state-replication log** (*Ordered, Unique, Atomic, Reliable, Resumable, Bookmarkable*), used by Kubernetes `watchCache`, `etcd/cache`, and `client/v3/leasing` to maintain in-memory state replicas. |
-| **Where Streams Terminate** | **Strictly at the Master** (§2.2, §2.8, pp. 3, 7). Replicas do not serve client sessions. | **Any member (leader or follower) or `grpcproxy`**, without Raft or `ReadIndex` coordination (`server/etcdserver/api/v3rpc/watch.go`). |
-| **Coupling Between Event Delivery and Liveness** | **Tightly coupled** (§2.8, pp. 7–8): invalidations and events ride on Session KeepAlive replies. If the master is lost, the client's local lease timer enters **Jeopardy** (45 s grace period), immediately disabling the client cache and blocking API calls so the application cannot act on stale state. | **Completely decoupled**: a watch stream has no session lease. Without `WithRequireLeader` (default), a partitioned watch stays open forever; with `WithRequireLeader`, it checks only local `s.Leader() == raft.None`, fails in `grpcproxy`, and has no jeopardy signal before destroying the watch. |
-| **Behavior on Master / Leader Failover** | **Explicit `fail-over` event (lossy by design)** (§2.5, §2.9 step 5, §4.6, pp. 5, 9, 14). On master failover, Chubby flushes caches and emits a `fail-over` event warning applications to rescan. In §4.6 (p. 14), Burrows reflects: *"We might have done better... to ensure that no events were lost during a fail-over."* | **Revision-indexed lossless history (`Resumable`) paired with fragile client cursor tracking.** Etcd's replicated MVCC log provides the exact lossless failover capability Burrows wished for in §4.6—provided the client cursor (`nextRev`) and replica state remain consistent. |
+| **Primary Client Cache Consistency Mechanism** | **Master-driven blocking cache invalidations** piggybacked on Master-bound Session KeepAlives (§2.7–§2.8, pp. 6–8, `doc/chubby-osdi06.md:227-280`). Before committing a write, the Chubby master blocks the write until every client caching that file/directory acknowledges invalidation on its KeepAlive reply or its session lease expires. | **Asynchronous MVCC Watch streams** (`Watch` RPC). Writers never block on watchers; watchers stream asynchronously from any replica's MVCC history (`[compactMainRev, currentRev]`). |
+| **Role of Events (`Watch`)** | **Advisory, best-effort hints** (§2.5, p. 5, `doc/chubby-osdi06.md:161-175`; §4.5, pp. 13–14, `doc/chubby-osdi06.md:516-524`). Burrows explicitly notes that Chubby avoided using events as a general publish/subscribe replication log. | **Primary state-replication log** (*Ordered, Unique, Atomic, Reliable, Resumable, Bookmarkable*), used by Kubernetes `watchCache`, `etcd/cache`, and `client/v3/leasing` to maintain in-memory state replicas. |
+| **Where Streams Terminate** | **Strictly at the Master** (§2.2, p. 3, `doc/chubby-osdi06.md:86-95`; §2.8, p. 7, `doc/chubby-osdi06.md:251-262`). Replicas do not serve client sessions. | **Any member (leader or follower) or `grpcproxy`**, without Raft or `ReadIndex` coordination (`server/etcdserver/api/v3rpc/watch.go`). |
+| **Coupling Between Event Delivery and Liveness** | **Tightly coupled** (§2.8–§2.9, pp. 7–8, `doc/chubby-osdi06.md:257-292`): invalidations and events ride on Session KeepAlive replies. If the master is lost, the client's local lease timer enters **Jeopardy** (45 s grace period, §2.9, p. 8, `doc/chubby-osdi06.md:283-292`), immediately disabling the client cache and blocking API calls (`:289`) so the application cannot act on stale state. | **Completely decoupled**: a watch stream has no session lease. Without `WithRequireLeader` (default), a partitioned watch stays open forever; with `WithRequireLeader`, it checks only local `s.Leader() == raft.None`, fails in `grpcproxy`, and has no jeopardy signal before destroying the watch. |
+| **Behavior on Master / Leader Failover** | **Explicit `fail-over` event (lossy by design)** (§2.5, p. 5, `doc/chubby-osdi06.md:167`; §2.9 step 5, p. 9, `doc/chubby-osdi06.md:309`; §4.6, p. 14, `doc/chubby-osdi06.md:534`). On master failover, Chubby flushes caches and emits a `fail-over` event warning applications to rescan. In §4.6 (`doc/chubby-osdi06.md:534`), Burrows reflects: *"We might have done better... to ensure that no events were lost during a fail-over."* | **Revision-indexed lossless history (`Resumable`) paired with fragile client cursor tracking.** Etcd's replicated MVCC log provides the exact lossless failover capability Burrows wished for in §4.6 (`doc/chubby-osdi06.md:534`)—provided the client cursor (`nextRev`) and replica state remain consistent. |
 
 ---
 
@@ -924,38 +964,38 @@ Comparing etcd's Watch subsystem with Google's Chubby lock service (`doc/chubby-
 
 | Failure Mode | Section | Promise(s) Violated / Affected | Affected Versions | Verification Source (`v3.7.3` / `jetcd-0.8.7`) |
 |---|---|---|---|---|
-| Watcher on partitioned member without `WithRequireLeader` stalls forever while receiving unfenced `ProgressNotify` (`#17611`) | §1.2, §2.2, §3.1 | Liveness & freshness (contract gap fatal for state caches) | `etcd v3.7.3`, `clientv3 v3.7.3`, `jetcd 0.8.7` | `interceptor.go:239-258`, `v3rpc/watch.go:395-400, 558-570`, `watchable_store.go:507-540` |
+| Watcher on partitioned member without `WithRequireLeader` stalls forever while receiving unfenced `ProgressNotify` (`#8673`, `#8980`, `k8s#89488`) | §1.2, §2.2, §3.1 | Liveness & freshness (contract gap fatal for state caches) | `etcd v3.7.3`, `clientv3 v3.7.3`, `jetcd 0.8.7` | `interceptor.go:239-258`, `v3rpc/watch.go:395-400, 558-570`, `watchable_store.go:507-540` |
 | `WithRequireLeader` closes client watch channel terminally on `ErrNoLeader` instead of failing over to surviving quorum (`#8980`, `#12534`, `k8s#111116`) | §3.1 (Failure #1) | Resumable / transparent failover | `clientv3 v3.7.3`, `jetcd 0.8.7` | `client/v3/watch.go:665-670`, `WatchImpl.java:353-355` |
-| `ErrNoLeader` teardown discards `ws.initReq.rev` and emits `Header.Revision == 0` on `startRev == 0` watches, losing writes committed during partition | §3.1 (Failure #2) | **Reliable**, **Resumable** | `clientv3 v3.7.3` | `client/v3/watch.go:494-496, 667, 846-872` |
-| Partitioned member's gRPC `SubConn` stays `READY` after `ErrGRPCNoLeader` trailer; `openWatchClient()` returns `err == nil` on `NewStream` and fails on `Recv()` | §3.1 (Failure #3) | Resumable / manual retry liveness | `clientv3 v3.7.3` | `client/v3/watch.go:772, 1039-1062`, `network_partition_test.go:228-238` (`a57e967d84`) |
-| `ErrNoLeader` teardown discards queued events in `ws.buf` and drops `Canceled: true` / `ErrNoLeader` response after `250ms` (`closeSendErrTimeout`, **Moderate confidence** on encounter frequency) | §3.1 (Failure #4) | **Reliable**, terminal error delivery contract (`watch.go:57-70`) | `clientv3 v3.7.3` | `client/v3/watch.go:40, 478-485, 520-541, 824-836` |
+| `ErrNoLeader` teardown discards `ws.initReq.rev` and emits `Header.Revision == 0` on `startRev == 0` watches, losing writes committed during partition | §3.1 (Failure #2) | **Reliable**, **Resumable** | `clientv3 v3.7.3` | `client/v3/watch.go:494-496, 667, 838-872` |
+| Partitioned member's gRPC `SubConn` stays `READY` after `ErrGRPCNoLeader` trailer; `openWatchClient()` returns `err == nil` on `NewStream` and fails on `Recv()` | §3.1 (Failure #3) | Resumable / manual retry liveness | `clientv3 v3.7.3` | `client/v3/watch.go:772, 970, 1039-1062`, `network_partition_test.go:209-264` (`a57e967d84`) |
+| `ErrNoLeader` teardown discards queued events in `ws.buf` and drops `Canceled: true` / `ErrNoLeader` response after `250ms` (`closeSendErrTimeout`, **Moderate confidence** on encounter frequency) | §3.1 (Failure #4) | **Reliable**, terminal error delivery contract (`watch.go:108-111`) | `clientv3 v3.7.3` | `client/v3/watch.go:39, 478-485, 520-541, 824-836` |
 | `ErrNoLeader` racing with rejected/canceled `Created` substream deadlocks `watchGRPCStream.run()` at `w.wg.Wait()` (`#17611`, `#17622`, **Moderate confidence** on race reachability) | §3.1 (Failure #5) | Client liveness (permanent goroutine deadlock) | `clientv3 v3.7.3` | `client/v3/watch.go:466-476, 520-541, 601-609, 803` |
 | `RequestProgress(ctx)` without `WithRequireLeader(ctx)` opens a separate empty `watchGRPCStream` (`#12254`) | §3.1 (Failure #6) | **Bookmarkable** | `clientv3 v3.7.3` | `client/v3/watch.go:330, 413-428, 1086-1091` |
-| Apply-loop stall (`s.Leader() != raft.None`, **Moderate confidence** on stall schedule), `SIGSTOP` with `DialKeepAliveTime == 0`, or total client isolation hangs watch forever | §3.1 (Failure #7) | Liveness | `etcd v3.7.3`, `clientv3 v3.7.3` | `interceptor.go:329`, `server.go:843-845`, `client.go:231-236`, `watch.go:85-91, 274, 1039` |
-| `grpcproxy` reads `metadata.FromOutgoingContext` instead of `FromIncomingContext`, ignoring `WithRequireLeader` (`PR #7896`), and splits `__lostleader` across streams | §3.1 (Failure #8) | Documented `WithRequireLeader` contract (`watch.go:78-83`) | `etcd v3.3.0`–`v3.7.3` | `grpcproxy/watch.go:112`, `lease.go:161`, `leader.go:42-80`, `watch_broadcast.go:58-68`, `chan_stream.go:142-155` (`5e059fd8d`) |
+| Apply-loop stall (`s.Leader() != raft.None`, **Moderate confidence** on stall schedule), `SIGSTOP` with `DialKeepAliveTime == 0`, or total client isolation hangs watch forever | §3.1 (Failure #7) | Liveness | `etcd v3.7.3`, `clientv3 v3.7.3` | `interceptor.go:329`, `server.go:764, 843-845`, `client.go:231-236`, `watch.go:85-91, 274-282, 1039`, `options.go:29` |
+| `grpcproxy` reads `metadata.FromOutgoingContext` instead of `FromIncomingContext`, ignoring `WithRequireLeader` (`PR #7896`), and splits `__lostleader` across streams | §3.1 (Failure #8) | Documented `WithRequireLeader` contract (`watch.go:81-83`) | `etcd v3.3.0`–`v3.7.3` | `grpcproxy/watch.go:112`, `lease.go:161`, `leader.go:42-80`, `watch_broadcast.go:58-68`, `chan_stream.go:142-155` (`5e059fd8d`) |
 | `newStreamInterceptor` gives zero grace period (`s.Leader() == raft.None`) to new streams, killing failover watches during routine 1s leader elections | §3.1 (Failure #9) | Resumable / transparent failover (`k8s#111116`) | `etcd v3.7.3`, `clientv3 v3.7.3`, `jetcd 0.8.7` | `interceptor.go:239-242`, `client/v3/watch.go:667, 678` |
-| `startRev == 0` unlocked `Created` header read (`v3rpc/watch.go:340, 358`) + `clientv3` `nextRev = wr.Header.Revision` (`client/v3/watch.go:859`, **Moderate confidence** on Case B race frequency) | §3.2 | **Reliable** (drops $[R_1+1, R_2-1]$) or **Unique/Ordered** (replays $R_1$) | `etcd v3.7.3`, `clientv3 v3.7.3` | `v3rpc/watch.go:340, 358`, `client/v3/watch.go:845-872` |
+| `startRev == 0` unlocked `Created` header read (`v3rpc/watch.go:340, 358`) + `clientv3` `nextRev = wr.Header.Revision` (`client/v3/watch.go:859`, **Moderate confidence** on Case B race frequency) | §3.2 | **Reliable** (drops $[R_1+1, R_2-1]$) or **Unique/Ordered** (replays $R_1$) | `etcd v3.7.3`, `clientv3 v3.7.3` | `v3rpc/watch.go:340, 358`, `client/v3/watch.go:838-872` |
 | Failover to lagging follower (`startRev > s.store.currentRev`) regresses `nextRev` via `ProgressNotify` or snapshot `Restore` (`#20221`, `#19487`, `#15271`) | §3.3, §3.4 | **Bookmarkable**, **Ordered**, **Unique**, **Reliable** | `< v3.5.22`, `< v3.6.2`, `< v3.7.0` (fixed in `v3.7.3`) | `watchable_store.go:141, 374, 486, 525-527` (`cf0369e4a`, `973847aa2`) |
-| Server-wide `RequestProgress` / `ProgressNotify` suppression when any watcher on the server is in `unsynced`, `victims`, or `rev < w.startRev` (`#20242`, `#20240`) | §3.3 | **Bookmarkable** liveness | `etcd v3.7.3` | `watchable_store.go:515-539`, `v3rpc/watch.go:558-568` |
-| Canceled watch events buffered in `sendLoop.pending[wid]` and flushed to a reused `WatchId` or leaked (`#22673`) | §4.1 | **Filter**, **Ordered**, **Unique**, **Reliable**; memory | `etcd v3.7.3` | `v3rpc/watch.go:470-477, 534-553` |
-| Lock-order inversion in `progressIfSync` (`watchableStore.mu.RLock` $\to$ `store.mu.RLock`, `#22184`, **Low confidence** on `EtcdServer` deadlock reachability) | §4.2 | Storage-layer deadlock (`mvcc`), serialized in `EtcdServer` by `s.applySched` | `etcd v3.7.3` | `watchable_store.go:59-60, 516-519`, `watchable_store_txn.go:43-46`, `server.go:972-993, 2101-2105` |
-| `syncWatchers` scans unbounded `[minRev, curRev+1)` under `watchableStore.mu.Lock()` while delivering at most 1,000 revisions (`#22264`, `#16839`, **Moderate confidence** on stall duration) | §4.3 | Apply-loop latency & watch catch-up liveness | `etcd v3.7.3` | `watchable_store.go:346-414`, `watcher_group.go:28, 57-60` |
-| Compacted watchers leaked in `s.unsynced` when $\ge 512$ watchers are unsynced (`#22294`) | §4.4 | **Unique** cancellation, **Bookmarkable** liveness, CPU/memory | `etcd v3.7.3` | `watcher_group.go:226-269`, `watchable_store.go:215-218, 368, 403` |
-| `WithPrevKV()` silently returns `PrevKv == nil` when `ModRevision - 1` was compacted (`#10681`, `k8s#76624`, `k8s#123448`) | §4.5 | `WithPrevKV` accuracy | `etcd v3.7.3` | `v3rpc/watch.go:450-456` |
+| Stream-wide `WatchProgressRequest` (`RequestProgressAll`) suppression when any watcher on a shared gRPC `Watch` stream is in `unsynced`, `victims`, or `rev < w.startRev` (`#20242`, `#20240`) | §3.3 | **Bookmarkable** liveness on multiplexed streams | `etcd v3.7.3` | `watchable_store.go:507-540`, `v3rpc/watch.go:94, 395-400, 558-570` |
+| Canceled watch events buffered in `sendLoop.pending[wid]` and flushed to a reused `WatchId` or leaked (`#22673`) | §4.1 | **Filter**, **Ordered**, **Unique**, **Reliable**; memory | `etcd v3.7.3` | `v3rpc/watch.go:470-477, 530-554` |
+| Lock-order inversion in `progressIfSync` (`watchableStore.mu.RLock` $\to$ `store.mu.RLock`, `#22184`, **Low confidence** on `EtcdServer` deadlock reachability) | §4.2 | Storage-layer deadlock (`mvcc`), serialized in `EtcdServer` by `(*EtcdServer).run()`'s `sched` FIFO | `etcd v3.7.3` | `watchable_store.go:59-60, 516-519`, `watchable_store_txn.go:43-46`, `server.go:764, 844-845, 972-993, 2101-2105` |
+| `syncWatchers` scans unbounded `[minRev, curRev+1)` under `watchableStore.mu.Lock()` while delivering at most 1,000 revisions (`#22264`, `#16839`, **Moderate confidence** on stall duration) | §4.3 | Apply-loop latency & watch catch-up liveness | `etcd v3.7.3` | `watchable_store.go:346-464`, `watcher_group.go:28, 57-60` |
+| Compacted watchers leaked in `s.unsynced` when $\ge 512$ watchers are unsynced (`#22294`) | §4.4 | **Unique** cancellation, **Bookmarkable** liveness on that stream, CPU/memory | `etcd v3.7.3` | `watcher_group.go:226-269`, `watchable_store.go:215-218, 368, 403` |
+| `WithPrevKV()` silently returns `PrevKv == nil` when `ModRevision - 1` was compacted (`#10681`, `k8s#76624`, `k8s#123448`) | §4.5 | `WithPrevKV` completeness (`rpc.proto:806` hazard) | `etcd v3.7.3` | `v3rpc/watch.go:443-457` |
 | `grpcproxy` resets `wb.nextrev = 1` on cancel, drops `Canceled` (`watcher.go:107`), actively coalesces healthy broadcasts onto dead broadcast (`#21813`), and drops `RequestProgress` (`#19710`) | §4.6 | **Reliable** (silent total event loss & active poisoning), **Bookmarkable** | `etcd v3.7.3` | `watch_broadcast.go:55-128`, `watcher.go:107-110`, `watch_broadcasts.go:53-99`, `grpcproxy/watch.go:293-296` |
 | `etcd/cache` permanently wedges as not-ready after compaction resync (`#22614`) | §4.6 | Cache liveness after compaction | `etcd v3.7.3` | `cache/cache.go:349-369, 405-421`, `cache/demux.go:119-143, 296-308` |
-| 4-way cancellation deadlock between `watchGRPCStream.run()`, `serveWatchClient`, `recvLoop`, and `sendLoop` (`#18879`, `#20716`, PR `#21065`) | §4.7 | Stream liveness for all watches sharing the `watchGRPCStream` | `etcd v3.7.3`, `clientv3 v3.7.3` | `client/v3/watch.go:343, 548, 703, 789`, `v3rpc/watch.go:42, 122, 383, 519` |
-| Operator `etcdutl snapshot restore` without `--bump-revision --mark-compacted` rolls revision backwards while clients resume at old revision (`#14303`) | §4.8 | **Reliable**, **Resumable** (watches silently wait for future revision) | `etcd v3.7.3`, `clientv3 v3.7.3`, `jetcd 0.8.7` | `etcdutl/snapshot_command.go:83-84`, `watchable_store.go:141` |
-| `jetcd` overwrites `this.revision = Math.max(revision, Header.Revision)` on `Created` (`WatchImpl.java:267`, commit `70be01a`) | §5.1 | **Reliable**, **Resumable** (silently drops `[startRev, serverRev - 1]` on reconnect) | `jetcd 0.8.7` | `WatchImpl.java:179-181, 256-268` (`70be01a`) |
-| `jetcd` off-by-one `ProgressNotify` revision (`missing + 1`) and uncaught exception in `reschedule()` (`#1227`) | §5.2 | **Unique** (replays `Header.Revision`); liveness (watcher left open and dead) | `jetcd 0.8.7` | `WatchImpl.java:293, 312, 357-368` |
+| 4-way cancellation deadlock between `watchGRPCStream.run()`, `serveWatchClient`, `recvLoop`, and `sendLoop` (`#18879`, `#20716`, PR `#21065`) | §4.7 | Stream liveness for all watches sharing the `watchGRPCStream` | `etcd v3.7.3`, `clientv3 v3.7.3` | `client/v3/watch.go:290-291, 348, 590, 703, 781`, `v3rpc/watch.go:124, 179, 251, 383, 488, 519` |
+| Operator `etcdutl snapshot restore` without `--bump-revision --mark-compacted` rolls revision backwards while clients resume at old revision (`#14303`) | §4.8 | **Reliable**, **Resumable** (watches silently wait for future revision) | `etcd v3.7.3`, `clientv3 v3.7.3`, `jetcd 0.8.7` | `etcdutl/etcdutl/snapshot_command.go:83-84`, `watchable_store.go:141` |
+| `jetcd` overwrites `this.revision = Math.max(revision, Header.Revision)` on `Created` (`WatchImpl.java:267`, commit `70be01a`) | §5.1 | **Reliable**, **Resumable** (silently drops `[startRev, serverRev - 1]` on reconnect) | `jetcd 0.8.7`, `jetcd 0.8.8` | `WatchImpl.java:141, 167, 256-272` (`70be01a`) |
+| `jetcd` off-by-one `ProgressNotify` revision (`missing + 1`) and uncaught exception in `reschedule()` (`#1227`) | §5.2 | **Unique** (replays `Header.Revision`); liveness (watcher left open and dead) | `jetcd 0.8.7`, `jetcd 0.8.8` | `WatchImpl.java:291-313, 357-368` |
 
 ### 8.2 Open Questions and Follow-Up Reproduction Targets
 
 1. **Minimal Functional Reproducers for Client Event Loss and Proxy Poisoning:**
    - *`clientv3` `WithRequireLeader` event loss (§3.1 Failure #2) and `250ms` error drop (§3.1 Failure #4):* Verify both the skipped-write schedule on `startRev == 0` watches across a 1-node minority partition and the silent drop of `ErrNoLeader` when `ws.outc` is held full for $> 250\text{ ms}$.
-   - *`jetcd` historical event loss (§5.1):* Cut the gRPC stream immediately after `Created(Header.Revision = H)` for a watch opened at `startRevision = R < H` (before the 100 ms `syncWatchersLoop` batch arrives) and confirm that `resume()` skips $[R, H)$.
+   - *`jetcd` historical event loss (§5.1):* Cut the gRPC stream immediately after `Created(Header.Revision = H)` for a watch opened at `startRevision = R < H` (before the 100 ms `syncWatchers` batch arrives) and confirm that `resume()` skips $[R, H)$.
    - *`grpcproxy` active coalescing poison-pill (§4.6):* Trigger upstream watch cancellation on one broadcast, then emit an event on a second healthy broadcast for the same key range and confirm that `coalesce()` migrates the healthy broadcast's receivers onto the dead `wb.nextrev == 1` broadcast and stops the healthy broadcast.
-2. **Unresolved Antithesis `Resumable` Failure (`#20573`) (**Moderate confidence**):** Issue `#20573` (a snapshot-restore `Resumable` violation discovered by Antithesis in 2025) was closed as stale in November 2025 without an identified root cause; whether a subtle race remains in `watchableStore.Restore()` remains open.
+2. **Unresolved Antithesis `Resumable` Failure (`#20573`) (**Moderate confidence**):** Issue `#20573` (a `Resumable` violation discovered by Antithesis right after local snapshot creation at `server.go:2137, 2182` in 2025) was manually closed in November 2025 (`"No failures for long time."`) without an identified root cause; whether a subtle race remains around snapshot creation and watch resumption remains open.
 3. **Upstream Direction on Leader-Bound Watches and Apply-Stall Health Checks (`#22268`, `#22635`):** Upstream `main` recently merged an advisory `leader_id` field in `ResponseHeader` (`ee374bdc1`, `7135f1a61`, targeting v3.8) and proposed `apply_stall` / `apply_lag` health checks (`#22635`), but neither client-side leader-aware watch routing nor apply-progress-based stream cancellation is implemented.
 4. **Benchmarking `syncWatchers` Lock Contention (`#22264`) (**Moderate confidence** on tail-latency magnitude pending hardware measurements):** Once dedicated benchmark hardware is available (`AGENTS.md` §7), measuring Raft apply-loop tail latency (`Put` p99) while lagging watchers catch up across large revision spans will quantify the production impact of `syncWatchers()` holding `watchableStore.mu.Lock()`.
 
@@ -964,13 +1004,13 @@ Comparing etcd's Watch subsystem with Google's Chubby lock service (`doc/chubby-
 ## Conclusions
 
 1. **Watch's Architectural Strength Is Its Raft-Backed MVCC Log; Its Architectural Weakness Is Its Unfenced Stream Control Plane:**
-   Because etcd commits every key-value mutation through Raft into each replica's multi-version `bbolt` store under a cluster-wide monotonic `Revision`, historical watch events survive leader failovers without needing to replicate watcher registrations through Raft. That design directly solves the lossy failover limitation that Burrows noted in Chubby (§4.6). However, etcd undermines this strength by allowing any replica (leader, lagging follower, or partitioned member) to terminate watch streams, bind `startRev == 0`, and emit `ProgressNotify` bookmarks from its **unsynchronized local state** without Raft `ReadIndex` or session leases.
+   Because etcd commits every key-value mutation through Raft into each replica's multi-version `bbolt` store under a cluster-wide monotonic `Revision`, historical watch events survive leader failovers without needing to replicate watcher registrations through Raft. That design directly solves the lossy failover limitation that Burrows noted in Chubby (§4.6, `doc/chubby-osdi06.md:534`). However, etcd undermines this strength by allowing any replica (leader, lagging follower, or partitioned member) to terminate watch streams, bind `startRev == 0`, and emit `ProgressNotify` bookmarks from its **unsynchronized local state** without Raft `ReadIndex` or session leases.
 2. **Claiming "Eventual Consistency" While Admitting Events "Might Never Arrive" in a Quorum-Healthy Cluster Is a Fundamental Contradiction That Forces Clients Back to Polling:**
-   Etcd explicitly claims that Watch implements **eventual consistency** (`tests/robustness/README.md:111 @ v3.7.3`), which its own specification defines as the liveness property that components *"converge to the same view eventually"* (`tests/robustness/README.md:102 @ v3.7.3`). Yet `etcd-io/website` `content/en/docs/v3.7/learning/api_guarantees.md:36-38` states that *"events in unhealthy clusters might never arrive"*, and `content/en/docs/v3.7/learning/design-client.md:80, 106, 136` admits that even when the cluster **maintains a healthy majority quorum**, a watch stream can *"get stuck with one failed or partitioned node"* forever. This conflates **prefix safety** (which an empty, permanently silent stream satisfies vacuously) with **eventual consistency** (which requires eventual delivery). Worse, `WithRequireLeader` does not restore transparent watch liveness: it is disabled by default, non-functional through `grpcproxy`, blind to apply-loop stalls, and when triggered on direct connections, destroys the caller's watch (and discards `ws.initReq.rev` on `startRev == 0` watches) rather than failing over to the surviving quorum—while causing newly reconnecting streams to die with zero grace period if they hit a member during a normal 1-second election. Because a client cannot establish a watcher with guaranteed liveness or detect silent staleness from the watch stream alone, the push-subscription utility of Watch is negated unless the client bolts on **periodic polling** (linearizable `KV.Get` `ReadIndex` checks or scheduled watch restarts).
-3. **Server-Side Fixes for Multi-Member Reconnection (`v3.7.0`–`v3.7.3`) Traded Safety Regressions for Global Progress Starvation:**
-   Prior to `v3.5.22` / `v3.6.2` / `v3.7.0`, reconnecting a watch to a lagging follower or recovering a member via snapshot restore / compaction repeatedly violated *Ordered*, *Unique*, *Reliable*, and *Bookmarkable* (`#15220`, `#15271`, `#17529`, `#18089`, `#19179`, `#20221`). While `v3.7.3` repairs those historical corruption paths, the fix in `progressIfSync()` (`#20229`) inspects server-wide `s.unsynced`, `s.synced`, and `s.victims` maps under an inverted lock order (`#22184`), starving `RequestProgress` and `ProgressNotify` across the entire server whenever any single watcher is catching up (`#20242`). Meanwhile, open `v3.7.3` defects in `sendLoop.pending` (`#22673`), `watcherGroup.choose` (`#22294`), `syncWatchers` (`#22264`), `WithPrevKV` (`#10681`), `grpcproxy` (`#21813`), and `etcd/cache` (`#22614`) remain unfixed.
-4. **Java `jetcd` (`0.8.7`) Is Not Production-Safe for Resumable Historical Watches Without Client-Side Workarounds:**
-   Unlike Go `clientv3` (which preserves explicit starting revisions across `Created`), `jetcd` `0.8.7` overwrites `this.revision = Math.max(revision, response.getHeader().getRevision())` upon receiving `Created` (`WatchImpl.java:267`). Any stream disconnect after `Created` and before `syncWatchersLoop` finishes streaming historical events causes `jetcd` to reconnect at the server's tip revision, silently losing all intervening history.
+   Etcd explicitly claims that Watch implements **eventual consistency** (`tests/robustness/README.md:111 @ v3.7.3`), which its own specification defines as the liveness property that components *"converge to the same view eventually"* (`tests/robustness/README.md:102 @ v3.7.3`). Yet `etcd-io/website` `content/en/docs/v3.7/learning/api_guarantees.md:35-37` states that *"events in unhealthy clusters might never arrive"*, and `content/en/docs/v3.7/learning/design-client.md:80, 106, 136` admits that even when the cluster **maintains a healthy majority quorum**, a watch stream can *"get stuck with one failed or partitioned node"* forever. This conflates **prefix safety** (which an empty, permanently silent stream satisfies vacuously) with **eventual consistency** (which requires eventual delivery). Worse, `WithRequireLeader` does not restore transparent watch liveness: it is disabled by default, non-functional through `grpcproxy`, blind to apply-loop stalls, and when triggered on direct connections, destroys the caller's watch (and discards `ws.initReq.rev` on `startRev == 0` watches) rather than failing over to the surviving quorum—while causing newly reconnecting streams to die with zero grace period if they hit a member during a normal 1-second election. Because a client cannot establish a watcher with guaranteed liveness or detect silent staleness from the watch stream alone, the push-subscription utility of Watch is negated unless the client bolts on **periodic polling** (linearizable `KV.Get` `ReadIndex` checks or scheduled watch restarts).
+3. **Server-Side Fixes for Multi-Member Reconnection (`v3.7.0`–`v3.7.3`) Traded Safety Regressions for Multiplexed-Stream Progress Starvation:**
+   Prior to `v3.5.22` / `v3.6.2` / `v3.7.0`, reconnecting a watch to a lagging follower or recovering a member via snapshot restore / compaction repeatedly violated *Ordered*, *Unique*, *Reliable*, and *Bookmarkable* (`#15220`, `#15271`, `#17529`, `#18089`, `#19179`, `#20221`). While `v3.7.3` repairs those historical corruption paths, the fix in `progressIfSync()` (`#20229`) checks `ws.watchers` under an inverted lock order (`#22184`), starving on-demand `WatchProgressRequest` (`RequestProgress`) across all watchers multiplexed onto the same gRPC `Watch` stream whenever any single watcher on that stream is catching up or awaiting a future revision (`#20242`). Meanwhile, unfixed `v3.7.3` defects in `sendLoop.pending` (`#22673`), `watcherGroup.choose` (`#22294`), `syncWatchers` (`#22264`), `WithPrevKV` (`#10681`), `grpcproxy` (`#21813`), and `etcd/cache` (`#22614`) remain present on `origin/main`.
+4. **Java `jetcd` (`0.8.7` / `0.8.8`) Is Not Production-Safe for Resumable Historical Watches Without Client-Side Workarounds:**
+   Unlike Go `clientv3` (which preserves explicit starting revisions across `Created`), `jetcd` `0.8.7` (and `0.8.8`) overwrites `this.revision = Math.max(revision, response.getHeader().getRevision())` upon receiving `Created` (`WatchImpl.java:267`). Any stream disconnect after `Created` and before `syncWatchers` finishes streaming historical events causes `jetcd` to reconnect at the server's tip revision, silently losing all intervening history.
 5. **Production Consumers Must Apply Kubernetes-Style Defensive Patterns:**
    Any production system using etcd Watch to maintain an in-memory cache or coordination state must:
    - Never open watches with `startRev == 0`; always obtain an explicit revision $R$ (via `Get`) and watch from `WithRev(R + 1)`.

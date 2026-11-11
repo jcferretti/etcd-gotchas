@@ -754,7 +754,7 @@ All dates are as stated by the source.
 
 ### 11.7 etcd's own guidance and numbers
 
-- **Performance page** (v3.7 docs, copied from v3.6). The only official write numbers are from **etcd 3.2.0** on GCE with 8 vCPUs: 44,341 QPS at 22 ms average with 1,000 clients against the leader, and 50,104 QPS at 20 ms against all members, with 256-byte values. "For SSDs, the latency is often lower than 1ms." [Va]
+- **Performance page** (v3.7 docs, copied from v3.6). The newest official write numbers are from **etcd 3.2.0** (corrected 2026-11-10: not the only ones, since the v3.7 docs also carry `benchmarks/` pages for 2.x releases) on GCE with 8 vCPUs: 44,341 QPS at 22 ms average with 1,000 clients against the leader, and 50,104 QPS at 20 ms against all members, with 256-byte values. "For SSDs, the latency is often lower than 1ms." [Va]
 - **FAQ:** "wal_fsync_duration_seconds (p99 duration should be less than 10ms)", "backend_commit_duration_seconds (p99 duration should be less than 25ms)". [Va]
 - An etcd source comment assumes "The max throughput is around 10K" (`server.go:80-85`). [V]
 

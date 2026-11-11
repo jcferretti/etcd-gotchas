@@ -5,7 +5,7 @@
 | Component | Version | Notes |
 |---|---|---|
 | etcd | `v3.7.3` = `0a173d0410a9` | All `path:line` citations are at this tag unless stated otherwise. |
-| jetcd | `jetcd-0.8.7` = `23b61f1499a5` | `LeaseImpl.java` read in full (§5.3). For §5.4 (2026-11-09): `support/Errors.java`, `impl/{Impl,KVImpl,LockImpl,ElectionImpl}.java`, `ClientBuilder.java`, and commit `05f92e0`. `jetcd-0.8.8` was released on 2026-11-09 and is not analyzed. |
+| jetcd | `jetcd-0.8.7` = `23b61f1499a5` | `LeaseImpl.java` read in full (§5.3). For §5.4 (2026-11-09): `support/Errors.java`, `impl/{Impl,KVImpl,LockImpl,ElectionImpl}.java`, `ClientBuilder.java`, and commit `05f92e0`. `jetcd-0.8.8` was released on 2026-11-09 and is not analyzed, except that its diff to `LeaseImpl.java` was read on 2026-11-10 (§5.3: it fixes jetcd #1383). |
 | Raft library | `go.etcd.io/raft/v3` `v3.7.0`, the version pinned in `server/go.mod:30` | Only `raft.go`, fetched from the `etcd-io/raft` tag. Used for proposal forwarding (§3.2) and for tick and CheckQuorum timing (§3.4, R1). |
 | Kubernetes | `master` at `3c690c189e5d` (fetched 2026-10-31); two files at tag `v1.37.2` | The `master` files are "current Kubernetes", not a release (§7). |
 
@@ -29,13 +29,18 @@ Upstream state was re-checked on 2026-11-01:
   reports cite, through the GitHub API; the fixes, in code at `v3.7.3` and
   `jetcd-0.8.7`; and the v3.7 lock docs (`etcd-io/website` @
   `41e5cd6ab9ef`). Results: §2.3, §5.4, §8.
+- **Accuracy review (2026-11-10):** the claims that
+  `etcd-issues-and-mitigations-claude.md` takes from this file were
+  re-checked against the code and the issue threads as they stood that
+  day. Corrections and the new upstream reports (etcd #22714, jetcd #1383
+  fixed in 0.8.8) are listed in Appendix C.1.
 
 **Nothing was run or reproduced.** "Inferred" and "traced" mean derived from
 code reading only. Confidence tags (High / Moderate / Low) apply to the claim
 they follow, not to the whole document.
 
 **Upstream references:** the most important are:
-- etcd [#15247](https://github.com/etcd-io/etcd/issues/15247), [#12528](https://github.com/etcd-io/etcd/issues/12528), [#22649](https://github.com/etcd-io/etcd/issues/22649), [#18428](https://github.com/etcd-io/etcd/pull/18428), [#13915](https://github.com/etcd-io/etcd/issues/13915) and [#9888](https://github.com/etcd-io/etcd/issues/9888);
+- etcd [#15247](https://github.com/etcd-io/etcd/issues/15247), [#12528](https://github.com/etcd-io/etcd/issues/12528), [#22714](https://github.com/etcd-io/etcd/issues/22714), [#22649](https://github.com/etcd-io/etcd/issues/22649), [#18428](https://github.com/etcd-io/etcd/pull/18428), [#13915](https://github.com/etcd-io/etcd/issues/13915) and [#9888](https://github.com/etcd-io/etcd/issues/9888);
 - Kubernetes [#65497](https://github.com/kubernetes/kubernetes/issues/65497) and [#110210](https://github.com/kubernetes/kubernetes/issues/110210);
 - from the Jepsen reports: etcd [#11456](https://github.com/etcd-io/etcd/issues/11456), [#11457](https://github.com/etcd-io/etcd/issues/11457), [#14890](https://github.com/etcd-io/etcd/issues/14890), [#18424](https://github.com/etcd-io/etcd/issues/18424); jetcd [#1444](https://github.com/etcd-io/jetcd/issues/1444) / PR [#1445](https://github.com/etcd-io/jetcd/pull/1445).
 
@@ -52,6 +57,8 @@ survey.
 - Restructured for readability the same day.
 - Extended 2026-11-09 with the Jepsen reports and the state of their fixes
   (§2.3, §5.4, §8), at the user's request.
+- Corrected 2026-11-10 after an accuracy review, at the user's request
+  (Appendix C.1).
 
 Appendix C has the revision history and a map from the old section numbers
 to the new ones.
@@ -107,11 +114,16 @@ Chubby?
   revoked within TTL of an acknowledged renewal (P3). Reproduced bugs broke
   this on failover in every release before v3.4.31, v3.5.13 and v3.6.0
   (#12528, #15247). — **High**.
-- **At v3.7.3 it holds, with caveats.** With the default configuration and a
-  client renewing on schedule, no violation has been reproduced. But the fix
-  is a heuristic leadership check, not a fence, and narrow windows remain
-  (R1–R5). With the Alpha checkpoint feature on, the open bug #22649 breaks
-  the promise outright. — **Moderate** for the residual windows.
+- **At v3.7.3 it holds only with caveats.** With the default configuration
+  and a client renewing on schedule, this project has reproduced no
+  violation. But the fix is a heuristic leadership check, not a fence, and
+  windows remain (R1–R5). Upstream #22714 (filed 2026-11-06, open, not yet
+  confirmed by a maintainer) reports one of them reproduced on v3.7.2 and
+  v3.6.15 release binaries: a leader partitioned while more than 16 leases
+  expire on it (R2, §3.4; added 2026-11-10). With the Alpha checkpoint
+  feature on, the open bug #22649 breaks the promise outright.
+  — **Moderate** for the residual windows; for R2 through a partition,
+  **High** (mechanism) and **Moderate** (the reported loss rates).
 - **The replicated key-value state is never at risk (P1).** Every
   lease-driven deletion is a Raft entry, applied identically on every member.
   — **High**.
@@ -134,8 +146,8 @@ Chubby?
 | # | Finding | Status | Confidence | § |
 |---|---|---|---|---|
 | 1 | A stalled ex-leader revokes live leases, and acknowledges renewals that the new leader never sees (#12528, #15247) | Fixed for the reported scenarios (v3.4.31, v3.5.13, v3.6.0) by a leadership check before proposing | High | 3.1–3.3 |
-| 2 | Residual windows R1–R5 around that check | Open; none reproduced | Moderate existence; Low impact | 3.4 |
-| 3 | A leader cut off by a network partition skips the ReadIndex check (#18428) | Not a P3 violation: the ET extension added by Promote covers it, to within about one tick | Moderate | 3.4 (R1) |
+| 2 | Residual windows R1–R5 around that check | Open. None reproduced by this project. Upstream #22714 (2026-11-06, open) reports R2 reproduced on v3.7.2 and v3.6.15 through a partitioned leader; fix PR #22730 open | Moderate existence; Low impact. R2 through a partition: High (mechanism); Moderate (reported rates) | 3.4 |
+| 3 | A leader cut off by a network partition skips the ReadIndex check (#18428) | For the renewals it acknowledges, not a P3 violation: the ET extension added by Promote covers them, to within about one tick. For expiry revocations queued in a batch of more than 16 leases, it is one (R2, #22714; corrected 2026-11-10) | Moderate | 3.4 (R1, R2) |
 | 4 | #22649: a renewal reports the full TTL while the server keeps a shorter one | Open; only with Alpha `LeaseCheckpoint` on; fix PR #22650 open | High (code) | 3.5 |
 | 5 | TTL reset on every leader change and restart (P2) | By design; checkpointing is Alpha, off, and limited | High | 1.3, 1.4, 2.2 |
 | 6 | Go client #22081, #22094: the application is told its keep-alive ended while the lease is renewed forever | Open; affects only applications that pass `WithRequireLeader` contexts to `KeepAlive` | High (code); Moderate (consequence) | 5.2 |
@@ -144,7 +156,7 @@ Chubby?
 | 9 | Keepalives forwarded by followers still block on the leader's apply backlog. Expiry costs one Raft proposal per lease, and one root token per revocation when auth is on | Code structure; not measured | High (code); Low–Moderate (magnitude) | 6 |
 | 10 | Kubernetes is insulated from the P3 bugs (it never calls `KeepAlive`). It is exposed to P2 (Events), to revocation cost, and to the open watch bug #110210 | — | High (code); Moderate ("insulated") | 7 |
 | 11 | Process: the core failover bug was closed once by a stale bot; both lease redesign trackers were closed by the project's stale bot while their `stage/tracked` label should have exempted them, and neither has been reopened since; the correctness harness does not exercise expiry or keepalive | — | High | 3.7, 8 |
-| 12 | Automatic retries (Jepsen, jetcd 0.8.2). jetcd ≤ 0.8.3 retried writes after indefinite failures, which Jepsen showed as lost updates and aborted reads. Both clients still retry lease grant and revoke, and jetcd retries `Lock`, whose in-flight first attempt can delete the key the retry reused | jetcd write retries fixed in 0.8.5 (#1444). Lease and lock retries: by design; the lock race is not reported upstream | High (code); Low (lock race likelihood; inferred) | 5.4 |
+| 12 | Automatic retries (Jepsen, jetcd 0.8.2). jetcd 0.5.8 to 0.8.4 retried writes after indefinite failures, which Jepsen showed as lost updates and aborted reads. Both clients still retry lease grant and revoke, and jetcd retries `Lock`, whose in-flight first attempt can delete the key the retry reused | jetcd write retries fixed in 0.8.5 (#1444). Lease and lock retries: by design; the lock race is not reported upstream | High (code); Low (lock race likelihood; inferred) | 5.4 |
 
 **What protects applications is fencing.** No lease design gives mutual
 exclusion by itself. With fencing through etcd transactions, writes to etcd
@@ -229,7 +241,10 @@ Two consequences follow.
    CheckQuorum on (`server/etcdserver/bootstrap.go:548`), a healthy but
    partitioned leader steps down within about 2 × ET, typically before any
    lease could expire on its clock. That is why a plain network partition is
-   mostly harmless, and why *stalls* are not (§3).
+   mostly harmless, and why *stalls* are not (§3). The exception (added
+   2026-11-11) is a lease already within about 2 × ET of expiry when the
+   partition starts: it expires on the cut-off leader's clock first. If
+   more than 16 do so in one batch, R2 applies (§3.4, #22714).
 
 ### 1.4 Checkpointing and its limits
 
@@ -390,6 +405,14 @@ lock workloads took a lease per acquisition, kept it alive with jetcd
   lease can still expire before the reply arrives, so fencing stays
   necessary. The waiter is still not woken when its own key is deleted
   (#19597; TODO at `mutex.go:88`). — **High** (code and git).
+- **Elections were not fixed** (added 2026-11-10). `Election.Campaign`
+  returns success after `waitDeletes` with no check that its own key still
+  exists (`client/v3/concurrency/election.go:93-106`; the file is
+  unchanged on `origin/main`). A campaigner whose lease expired while it
+  waited is therefore told that it leads. Its next `Proclaim` fails,
+  because `Proclaim` is fenced (`election.go:115`). The server Election
+  API, which jetcd calls, runs the same code. — **High** (code); the
+  consequence is inferred, not reproduced.
 
 **Documentation** ([#11457](https://github.com/etcd-io/etcd/issues/11457);
 v3.7 docs at `etcd-io/website` @ `41e5cd6ab9ef`).
@@ -403,8 +426,16 @@ v3.7 docs at `etcd-io/website` @ `41e5cd6ab9ef`).
     (`dev-guide/api_concurrency_reference_v3.md:13`).
   - `etcdctl/README.md:1175-1179` still shows
     `etcdctl lock mylock ./etcdctl put foo bar`, the unfenced pattern
-    Jepsen cited. `etcdctl lock` exports the fencing token to its command
-    as `ETCD_LOCK_REV` (`:1157`), but no example uses it.
+    Jepsen cited. `etcdctl lock` exports `ETCD_LOCK_KEY` and
+    `ETCD_LOCK_REV` to its command (`:1157`), but no example uses them.
+    `ETCD_LOCK_REV` is the response-header revision at acquisition, not
+    the key's create revision
+    (`etcdctl/ctlv3/command/lock_command.go:126-131`;
+    `client/v3/concurrency/mutex.go:83`, `:106`, `:127-130`). The two are
+    equal only when the lock was acquired without waiting, so it cannot
+    serve as `rev` in `CreateRevision(key) == rev`. It increases from one
+    holder to the next, so it can serve as a token for an external
+    resource (inferred; corrected 2026-11-10).
 
 — **High** (text read).
 
@@ -602,8 +633,9 @@ expiry-driven revocations, checked at apply.
 
 ### 3.4 Residual windows at v3.7.3
 
-All five windows are inferred from code; none was reproduced. Each exists
-because the shipped check is a heuristic:
+All five windows are inferred from code, and this project reproduced none.
+Upstream now reports a reproduction of R2 (#22714, 2026-11-06; see R2
+below). Each exists because the shipped check is a heuristic:
 - it is skipped whenever the member's own Raft tick is fresh (#18428);
 - it is evaluated once per batch of up to 500 revocations, which are then
   proposed 16 at a time with 7-second timeouts;
@@ -617,7 +649,7 @@ Whether a stalled leader can still revoke a live lease at v3.7.3 is
 |---|---|---|---|---|
 | R1 | A leader stall ends, and the tick is processed before the step-down | Leadership check skipped; a stale revocation batch is dispatched | Moderate | Low |
 | R1, partition variant | A leader cut off by the network, otherwise healthy | It acknowledges renewals the new leader never sees | High (mechanism) | Covered by Promote's extension, to within about one tick |
-| R2 | Leadership lost during a large expiry batch | Later proposals go out seconds after the single check | Moderate | Low; it stretches R1 and R5 |
+| R2 | Leadership lost during a large expiry batch | Later proposals go out seconds after the single check | Moderate; High (mechanism) with a partitioned leader, per #22714 | Low while it only stretches R1 and R5. With a partitioned leader and more than 16 expiring leases, #22714 reports most of the batch deleted (Moderate: not re-run here) |
 | R3 | A follower forwards a keepalive to a stalled ex-leader | The peer renewal path has no leadership check | High | Low |
 | R4 | A renewal races a revocation's key deletion | Positive TTL for a lease being revoked | Moderate | Low; only in the last moments of the TTL |
 | R5 | A leader change during dispatch of a *correct* expiry batch | The revocation commits after the new leader acknowledged a renewal | Moderate | Low |
@@ -656,9 +688,13 @@ a leader before they resign". Also:
 "[Please consider reverting and redesign](https://github.com/etcd-io/etcd/pull/18428#issuecomment-2291124275)".
 The author replied that the check only targets self-stalls, and that Raft
 handles partitions.
-- For revocations, I agree with the author on the partition case. A
+- For revocations, I agreed with the author on the partition case: a
   minority-side leader's proposals cannot commit, and it steps down before
-  typical TTLs elapse (§1.3, item 5).
+  typical TTLs elapse (§1.3, item 5). **Corrected 2026-11-10:** that
+  covers only the proposals it makes while still isolated and leader. The
+  rest of the same batch wait for a semaphore slot, are proposed after it
+  has stepped down, and are forwarded to the new leader. That is R2, and
+  #22714 reports it reproduced.
 - For renewals, Promote's extension is designed to cover the window; the
   next paragraph checks that.
 
@@ -721,6 +757,48 @@ re-checks leadership, lessor primacy or term:
   proposed.
 - Existence **Moderate**. Impact **Low**, unless R1 or R5 occurs with more
   than 16 expired leases in the batch.
+
+**Upstream reproduction (added 2026-11-10).** etcd
+[#22714](https://github.com/etcd-io/etcd/issues/22714), "Partitioning a
+leader leads to premature lease expiry" (filed 2026-11-06 by an outside
+reporter; `type/bug`; open; no maintainer reply by 2026-11-10). Fix PR
+[#22730](https://github.com/etcd-io/etcd/pull/22730) is open and awaits
+approval for testing.
+- **The scenario.** Three members, release binaries. 200 leases with a 4 s
+  TTL are granted through leader L and not renewed. L is partitioned 0.3 s
+  before they expire on it. A client then keeps every lease alive through
+  the other two members. The partition heals 3 s later.
+- **The reported result.** 168–184 of the 200 leases were deleted in 10 of
+  10 trials on v3.7.2, and 184 of 200 in 10 of 10 on v3.6.15. Each had been
+  renewed on the new leader a fraction of a second earlier. With the heal
+  12 s after the cut, 136–184 were still deleted.
+- **The controls.** Cutting L 3 s before expiry, so that it steps down
+  first, deleted nothing. Neither did a batch of 16 leases, where no
+  revocation waits for a slot.
+- **The mechanism it gives is R2 combined with R1's partition variant.**
+  - L's tick loop is live, so `ensureLeadership()` passes without a quorum
+    check (`server.go:908-923`), once for the whole batch (`:867`).
+  - The first 16 proposals hang in L's log and time out after `ReqTimeout`.
+  - The queued ones are then proposed by L as a follower, forwarded, and
+    committed by the new leader.
+  - Apply is unconditional (`server/etcdserver/apply/backend.go:94-96`),
+    although `Promote` had extended the leases and clients had renewed
+    them.
+- **What this project checked.** Each code step above matches `v3.7.3`,
+  and etcd does not disable proposal forwarding (no
+  `DisableProposalForwarding` under `server/`). The reproduction was not
+  re-run.
+- **What it changes.**
+  - The partition variant of R1 was assessed for renewals only; for
+    revocations, see the correction under R1.
+  - The trigger needs more than 16 leases expiring in one batch on a
+    leader that is then isolated. The reporter's "realistic route" is
+    keepalives that stop reaching a sick leader before it is fully cut
+    off.
+  - Its first fix direction is the term fence of §3.3 and §4.3.
+
+— **High** (mechanism, from code); **Moderate** (the loss rates: one
+report, not confirmed by a maintainer, not re-run here).
 
 #### R3. Forwarded renewals skip the leadership check
 
@@ -812,8 +890,8 @@ each step is verified.
   keep-alive channel by calling `KeepAlive` again on the same lease ID, or
   that renews with `KeepAliveOnce`. Such a renewal succeeds at B, and the
   lease is revoked shortly afterwards.
-- **The gap is short unless R2 stretches it.** With at most 16 leases in the
-  batch, the gap between the check and the proposal is a goroutine hop,
+- **The gap is short unless R2 stretches it.** With no more than 16 leases
+  in the batch, the gap between the check and the proposal is a goroutine hop,
   microseconds to milliseconds (inferred). During a leader change, larger
   batches stretch it to seconds (R2).
 - **Only a fence closes it.** Unlike R1–R3, A's view was *correct* when it
@@ -1284,9 +1362,27 @@ unless stated. Code facts are **High**; consequences are traced, not run.
     throws. The future has already failed with the connection error in that
     case, so the caller sees the original error (Java `whenComplete`
     semantics).
-- **Open report.** jetcd [#1383](https://github.com/etcd-io/jetcd/issues/1383)
-  (open; jetcd 0.7.7, etcd 3.5.13) reports `onCompleted` firing after several
-  minutes of keep-alive. I read only the report; it is not analyzed here.
+- **A clean stream end stops all renewals** (jetcd
+  [#1383](https://github.com/etcd-io/jetcd/issues/1383), reported 2024-07 on
+  jetcd 0.7.7 with etcd 3.5.13: `onCompleted` fires after several minutes
+  of keep-alive; rewritten 2026-11-10, when the issue was no longer open).
+  - **Cause, at 0.8.7.** `doStart` opens the stream with `null` as its end
+    handler (`:203-207`). If the stream ends without an error, nothing
+    restarts it and no observer is told. The periodic task keeps writing
+    to the dead stream, every lease stops being renewed, and each observer
+    gets `onCompleted` when its local deadline passes.
+  - **Fix.** PR [#1628](https://github.com/etcd-io/jetcd/pull/1628)
+    (commit `42b3f96`, merged 2026-11-07, first in `jetcd-0.8.8`) reopens
+    the stream after a clean end, without notifying observers. Only that
+    diff was read; 0.8.8 is otherwise not analyzed.
+  - **Reachability.** The fix names "an etcd member shutting down
+    gracefully, or a proxy closing the stream". At `v3.7.3` the server's
+    handler returns without an error only when the client closes its side
+    (`server/etcdserver/api/v3rpc/lease.go:113-116`); the other exits
+    return the stream context's error. So on a direct connection the
+    trigger is unconfirmed, and an intermediary is the likelier source.
+    — **High** (code); **Low–Moderate** (reachability on a direct
+    connection).
 
 ### 5.4 Automatic retries of non-idempotent RPCs (Jepsen, jetcd 0.8.2)
 
@@ -1309,14 +1405,22 @@ consequences for lease and lock RPCs are traced from code, not run.
   definite one.
 - **Versions.** jetcd 0.6.0 (2021-12-15) through 0.8.2; 0.5.0 was also
   evaluated. Jepsen's workaround was `ClientBuilder.retryMaxAttempts(0)`.
+  By code the range is wider (added 2026-11-10): the retry on `UNAVAILABLE`
+  entered with commit `70c463c` ("Retry on unavailable error", 2021-07-08),
+  first tagged `jetcd-0.5.8`, and it is still in 0.8.4. That version exists
+  on Maven Central only (published 2024-11-14, before the fix was merged);
+  it has no git tag or GitHub release.
 - **History.** Jepsen reported the symptoms in 2022: etcd
   [#14092](https://github.com/etcd-io/etcd/issues/14092) and
   [#14890](https://github.com/etcd-io/etcd/issues/14890), jetcd
   [#1072](https://github.com/etcd-io/jetcd/issues/1072).
   - etcd closed #14092 "as a jetcd issue"; the stale bot closed jetcd
     #1072.
-  - etcd closed #14890 on 2024-08-02, a maintainer agreeing to "reject
-    Jepsen report as inaccurate" and betting the cause was Jepsen.
+  - etcd closed #14890 on 2024-08-02. The closing maintainer wrote that
+    the "problem is related to Java client and not on etcdserver side" and
+    that "we can official reject Jepsen report as inaccurate"; a second
+    agreed and bet that the cause was Jepsen (corrected 2026-11-10: this
+    line used to merge the two).
   - On the report's publication day, etcd opened
     [#18424](https://github.com/etcd-io/etcd/issues/18424), "etcd Go & Java
     client SDK's retry mechanism may break `Serializable`". The stale bot
@@ -1347,15 +1451,32 @@ Defaults: 2 retries, with backoff from 500 ms to 2.5 s
 | `Unlock` | Yes (`LockImpl.java:76-86`) | — (`Delete`, not retried) | The effect is, unless a delayed copy lands after a re-lock (#22082's pattern) |
 | Election calls | No (`impl/ElectionImpl.java:88-91`, `:111-114`, `:126-129`, `:162-165`) | — (recipes use `Txn`) | — |
 
-The Go client also retries any RPC that fails with a deadline or
-cancellation status while the caller's own context is still live
-(`client/v3/retry_interceptor.go:76-82`). The #18424 investigation
-concluded that the server never returns such a status for a request it
-executed, and could not reproduce the problem with the Go client.
-— **Moderate** (their analysis). It is consistent with the server code: a
-proposal's own timeout becomes `ErrTimeout` or one of its variants, all
-`Unavailable` (`parseProposeCtxErr`, `server/etcdserver/server.go:2359-2389`),
-and the Go client does not retry a write on `Unavailable` after connecting.
+The Go client also retries any RPC after refreshing an invalid auth token
+(`client/v3/retry_interceptor.go:84-95`), and on a learner's refusal when it
+has several endpoints (`:341-343`). Both are definite rejections.
+
+It also retries any RPC that fails with a deadline or cancellation status
+while the caller's own context is still live
+(`client/v3/retry_interceptor.go:76-82`). In #18424 a contributor's
+analysis, accepted by one maintainer, concluded that the client never sees
+such a status for a request the server executed, and that the problem
+could not be reproduced with the Go client. The maintainer added that the
+retry "might not be safe ... because the server side may have successfully
+processed the request". — **Moderate** (their analysis).
+- **For timeouts it is consistent with the server code.** A proposal's own
+  timeout becomes `ErrTimeout` or one of its variants, all `Unavailable`
+  (`parseProposeCtxErr`, `server/etcdserver/server.go:2359-2389`), and the
+  Go client does not retry a write on `Unavailable` after connecting.
+- **For cancellation its premise no longer holds at v3.7.x** (corrected
+  2026-11-10). The analysis relied on `errors.ErrCanceled` having no gRPC
+  mapping. Commit `b54c88406` (2026-02-03) added one:
+  `server/etcdserver/api/v3rpc/util.go:54` maps it to `Canceled`. It is
+  first in v3.7.0 and absent on `origin/release-3.6` and
+  `origin/release-3.5`. A proposal whose context is cancelled after it was
+  proposed returns that error (`server/etcdserver/v3_server.go:1127-1130`,
+  `server.go:2359-2362`). Whether a client whose context is still live can
+  receive it after the write executed is not established: the review found
+  no such path on a direct connection.
 
 **Consequences for leases and locks** (inferred; not reproduced).
 - **Orphan lease.** If a `LeaseGrant` executed and its reply was lost, the
@@ -1401,7 +1522,9 @@ and the Go client does not retry a write on `Unavailable` after connecting.
 **What applications should do.** — **Moderate** (derived from code and the
 report; untested).
 - jetcd: use 0.8.5 or later, and set `withAutoRetry()` only on writes that
-  are safe to repeat. On 0.6.0–0.8.3, set `retryMaxAttempts(0)`.
+  are safe to repeat. On 0.7.6–0.8.4, set `retryMaxAttempts(0)`: the
+  default is 2, and the option does not exist before 0.7.6 (corrected
+  2026-11-10).
 - Both clients: treat a write error that is not a definite rejection (an
   auth, permission or validation error) as "outcome unknown", and resolve
   it by reading. A failed compare is not an error: it is a definite answer
@@ -1469,7 +1592,13 @@ environment (AGENTS.md §7).
 
 - **One Raft entry per expired lease.**
   - `revokeExpiredLeases` proposes one `LeaseRevoke` per lease, with at most
-    16 in flight (`server.go:874-900`; `maxPendingRevokes`, `:103`).
+    16 in flight per batch (`server.go:874-900`; `maxPendingRevokes`,
+    `:103`). The semaphore is created per call, and the server's run loop
+    starts each batch in its own goroutine without waiting for the previous
+    one (`server.go:846-847`, `:859`). So batches overlap whenever one takes
+    longer than the lessor's 500 ms scan, and the total in flight is not
+    capped at 16, whatever the constant's comment says (corrected
+    2026-11-10).
   - Checkpoints, by contrast, batch up to 1000 leases per entry
     (`lessor.go:55`, `:674`).
   - The lessor hands over at most `leaseRevokeRate/2` = 500 leases per
@@ -1642,7 +1771,9 @@ Verified at `master` on 2026-10-31, except where tagged `v1.37.2`.
 
 1. **Reproduce R1/R2** on v3.7.3 in a worktree, with gofail. This would turn
    "Moderate" into a fact either way. It requires Go or a container build
-   (AGENTS.md §11).
+   (AGENTS.md §11). Since 2026-11-06, #22714 gives a recipe for R2 on
+   release binaries, and its fix PR #22730 carries an in-process test;
+   re-running either is the shortest path (§3.4, R2).
    - Start from the #15247 regression tests
      (`tests/e2e/v3_lease_no_proxy_test.go:36`, `:48`), which stall the
      leader with `raftBeforeSave` `sleep("30s")` (`:127`).
@@ -1745,8 +1876,9 @@ parts (§4.3):
     changes. Enabling it adds the #22649 risk until PR #22650 lands.
 - **Client libraries are the weakest layer.** Two open Go client bugs
   (#22081, #22094) and jetcd's `onError` contract can leave a lease renewed
-  forever after the application believes it is gone. Both clients' deadlines
-  are optimistic. — **High** (code).
+  forever after the application believes it is gone. jetcd up to 0.8.7 can
+  also stop renewing every lease after a clean stream end (#1383, fixed in
+  0.8.8; §5.3). Both clients' deadlines are optimistic. — **High** (code).
 - **Retries are fixed where Jepsen found them, not everywhere.** jetcd no
   longer retries writes by default (0.8.5). Both clients still retry lease
   grant and revoke, and jetcd retries `Lock`, which opens a narrow race
@@ -1806,7 +1938,9 @@ These recommendations follow from the code facts above; none was tested. —
 
 A reproduction of R1 or R5 would raise the residual-risk findings from
 Moderate to High. A failure to reproduce them after targeted failpoints
-would lower them.
+would lower them. For R2, a maintainer's confirmation of #22714 or a re-run
+here would settle the reported loss rates, which are Moderate until then
+(added 2026-11-10).
 
 ---
 
@@ -1831,6 +1965,7 @@ would lower them.
 |---|---|---|---|---|---|
 | [#15247](https://github.com/etcd-io/etcd/issues/15247) | All leases revoked when leader stuck (fdatasync/CPU) | closed, fixed (#16822) | P3 safety | **Yes** | body + 44 comments |
 | [#12528](https://github.com/etcd-io/etcd/issues/12528) | Old leader still revokes lease after stepping down (high CPU) | closed by stale bot, unfixed then | P3 safety | **Yes** | body |
+| [#22714](https://github.com/etcd-io/etcd/issues/22714) (row added 2026-11-10; filed 2026-11-06) | Partitioning a leader leads to premature lease expiry (reproduced by the reporter on v3.7.2 and v3.6.15) | **open**; fix PR #22730 open | P3 safety (§3.4, R2) | **Yes** | body |
 | [#13915](https://github.com/etcd-io/etcd/issues/13915) | Make leases linearizable (excluding TTL) | closed not planned by the stale bot (twice; reopened once by a maintainer; exemption ignored, §3.7) | P4 / design | Yes (proxying to leader outside Raft) | body + comments |
 | [#9888](https://github.com/etcd-io/etcd/issues/9888) | Leases may be auto-renewed indefinitely due to leader elections | closed (checkpointing) | P2 | **Yes** | body |
 | [#9395](https://github.com/etcd-io/etcd/issues/9395) | TTL resetting on leader elections or restart, undocumented | closed | P2 | **Yes** | body |
@@ -1881,6 +2016,7 @@ Most relevant first.
 - etcd [#12528](https://github.com/etcd-io/etcd/issues/12528): the same bug reported in 2020 on v3.4.6.
   - Closed by the stale bot 2021-06-14, unfixed.
   - Fix PR [#12531](https://github.com/etcd-io/etcd/pull/12531) closed unmerged 2021-09-16.
+- etcd [#22714](https://github.com/etcd-io/etcd/issues/22714) (open, filed 2026-11-06; added 2026-11-10): a partitioned leader's queued expiry revocations delete renewed leases, reproduced by the reporter on v3.7.2 and v3.6.15 (§3.4, R2). Fix PR [#22730](https://github.com/etcd-io/etcd/pull/22730) is open and unmerged.
 - etcd [#18069](https://github.com/etcd-io/etcd/issues/18069) / PR [#18428](https://github.com/etcd-io/etcd/pull/18428): leadership check made conditional for performance; a maintainer objected on safety.
 - etcd [#14758](https://github.com/etcd-io/etcd/issues/14758) / PR [#21389](https://github.com/etcd-io/etcd/pull/21389) (closed unmerged 2026-06-19): renew/revoke race. PR [#20590](https://github.com/etcd-io/etcd/pull/20590) (2025-09-05) is a partial fix.
 - etcd [#22649](https://github.com/etcd-io/etcd/issues/22649) (open): checkpointer swallows Raft errors. Fix PR [#22650](https://github.com/etcd-io/etcd/pull/22650) is open and unmerged.
@@ -1896,7 +2032,7 @@ Most relevant first.
 - etcd [#22081](https://github.com/etcd-io/etcd/issues/22081), [#22094](https://github.com/etcd-io/etcd/issues/22094) (both open): Go lease client `closeRequireLeader` bugs (§5.2). Fix PRs [#22087](https://github.com/etcd-io/etcd/pull/22087), [#22253](https://github.com/etcd-io/etcd/pull/22253), [#22291](https://github.com/etcd-io/etcd/pull/22291), all open.
 - etcd PR [#21122](https://github.com/etcd-io/etcd/pull/21122) (v3.7.0 only): keep-alive stream cancellation is no longer always reported as "no leader".
 - etcd PR [#5332](https://github.com/etcd-io/etcd/pull/5332) (v3.0.0) and commit `8024a0d15` (v3.2.0): origin of `WithRequireLeader` stream cancellation, and its lease-client support.
-- jetcd [#1322](https://github.com/etcd-io/jetcd/issues/1322) (commit `10b07f5`, jetcd 0.8.0) and [#1383](https://github.com/etcd-io/jetcd/issues/1383) (open): keep-alive error reporting (§5.3).
+- jetcd [#1322](https://github.com/etcd-io/jetcd/issues/1322) (commit `10b07f5`, jetcd 0.8.0) and [#1383](https://github.com/etcd-io/jetcd/issues/1383) (closed 2026-11-07 by PR [#1628](https://github.com/etcd-io/jetcd/pull/1628), first in jetcd 0.8.8): keep-alive error reporting, and renewals that stop after a clean stream end (§5.3).
 - jetcd [#1444](https://github.com/etcd-io/jetcd/issues/1444) / PR [#1445](https://github.com/etcd-io/jetcd/pull/1445) (commit `05f92e0`, merged 2025-02-18, first in jetcd 0.8.5): no default retry of non-idempotent operations (§5.4). Earlier reports of the same defect: jetcd [#1072](https://github.com/etcd-io/jetcd/issues/1072) (stale-closed 2022), etcd [#14092](https://github.com/etcd-io/etcd/issues/14092) (closed 2022 as a jetcd issue), [#14890](https://github.com/etcd-io/etcd/issues/14890) (closed 2024-08-02), [#18424](https://github.com/etcd-io/etcd/issues/18424) (closed not planned 2025-06-01).
 
 **Locks (P5)**
@@ -1930,6 +2066,7 @@ These are covered in §6 and Appendix A.
 | 2026-11-01 | §2.5 added after Antigravity disputed my rejection of its response-header finding. My rejection ("deliberate lower bound") holds only for successful renewals; see C.2. |
 | 2026-11-09 | **Jepsen pass**, at the user's request: the etcd 3.4.3 and jetcd 0.8.2 reports read in full, their issues traced, and their fixes checked at `v3.7.3` and `jetcd-0.8.7`. New: §2.3 "Jepsen's measurements", "#11456" and "Documentation"; §5.4 (automatic retries, including the lease grant/revoke and jetcd `Lock` consequences, inferred); key finding 12; a §9 row; §11.2, §11.3 bullets; Appendix A rows marked ‡; Appendix B entries. Corrected: the §8 Jepsen bullet attached process pauses to the healthy-cluster quote. No earlier finding or rating changed. Nothing run. |
 | 2026-11-09 | Context added to the closures of #13915 and #13776 (key finding 11, §2.1 P4, the §3.7 timeline and "Reading the timeline", §11.2, Appendices A and B): both were closed by the stale bot during the 2025-05-13 to 2026-01-13 window when its `stage/tracked` exemption was ignored, and #13915 had been reopened once by a maintainer. The earlier text could be read as maintainers declining the designs. Finding 11 and its High rating are unchanged: a tracked issue closed by the project's own process, and left closed, counts for an adopter the same as one declined. Checked through the GitHub API (labels, closers, timeline) and the workflow fix `55c5fabe5`. |
+| 2026-11-10 | **Accuracy review**, at the user's request, made while reviewing `etcd-issues-and-mitigations-claude.md`. New upstream facts: etcd #22714 and fix PR #22730 (Summary, key findings 2 and 3, §3.4 intro and table, R1, R2, §10, §11.4, Appendices A and B); jetcd #1383 fixed in 0.8.8 (§5.3, §11.2, Appendix B). Corrections: `ETCD_LOCK_REV` is the header revision at acquisition, not the create revision (§2.3); `Election.Campaign` lacks the post-wait check that #11456 added to `Mutex.Lock` (§2.3); the 16-revocation limit is per batch (§6.2); jetcd retried on `UNAVAILABLE` from 0.5.8 to 0.8.4, not "≤ 0.8.3" (key finding 12, §5.4); `retryMaxAttempts` exists only from 0.7.6 (§5.4); the #14890 closing quote had merged two maintainers (§5.4); the Go client's retry on a `Canceled` status rests on a premise that v3.7.0 changed (§5.4). R1's assessment of the partition case for revocations was wrong for batches of more than 16 leases; §1.3 item 5, the Appendix C.2 row on R1's partition variant and `leases-critique-claude.md` were qualified to match on 2026-11-11. Nothing was run. |
 
 **Old → new section numbers** (for references made before the
 restructuring):
@@ -1976,7 +2113,7 @@ difference is stated. A standalone summary of the rejections is in
 | Change | Where (new §) | Idea from | Verification and my call |
 |---|---|---|---|
 | R5: correct revocation delayed past a leader change | §3.4 R5, Summary, §4.3 | Codex | Each step re-traced in code. Added the bound from the client's deadline sweep and the `KeepAliveOnce`/re-`KeepAlive` exposure. Impact rated Low because the victim's lease had already expired on the old leader. |
-| Partition variant of R1: `isActive()` skips the ReadIndex on a partitioned leader | §3.4 R1, Summary | Antigravity | Mechanism confirmed. **Consequence rejected**: the source calls it a High-confidence P3 failure. My derivation from raft `v3.7.0` shows `Promote`'s ET extension covers it to within about one tick. |
+| Partition variant of R1: `isActive()` skips the ReadIndex on a partitioned leader | §3.4 R1, Summary | Antigravity | Mechanism confirmed. **Consequence rejected**: the source calls it a High-confidence P3 failure. My derivation from raft `v3.7.0` shows `Promote`'s ET extension covers it to within about one tick. Narrowed 2026-11-11: that holds for acknowledged renewals; expiry revocations queued on a partitioned leader do break P3 (R2, #22714). |
 | Checkpointing does not bound P2 under churn; recorded value is a duration | §1.4, §2, Summary | Codex | Verified in `Promote`/`Demote`/`scheduleCheckpointIfNeeded`. Added: `Session`'s 60 s default TTL is never checkpointed; the interval has no operator flag (the source's flag name does not exist at v3.7.3); the reset is asserted by `TestV3LeaseCheckpoint`. |
 | #22649 details: late clear does not repair the timer; PR #22650 | §3.5 | Codex | Verified. Added on my own: the partitioned-leader trigger, and the missing primacy re-check after the clear. |
 | #13675 (grant visible on a follower before the leader) | §3.6, §3.7, App. A | Codex | Maintainer diagnosis read; fix kept in `FastLeaseKeepAlive`. |

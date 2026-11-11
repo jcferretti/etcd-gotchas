@@ -341,3 +341,58 @@ recorded here (`AGENTS.md` §9, rule 1).
   the user's request: three new rows, notes on nine rows, the new prefix,
   and a paragraph on the Jepsen pass. A denylist scan of the working tree
   (the publish script's `grep -i -F`, paper excluded) found nothing.
+- 2026-11-10 and 2026-11-11: Accuracy review of
+  `analysis/etcd-issues-and-mitigations-claude.md` by Claude Code, at the
+  user's request. Its claims were re-checked against the code at the pinned
+  tags, the issue and PR threads (GitHub API), the two Jepsen reports and
+  the v3.7 docs, by five parallel sub-agents; each finding was then
+  re-checked directly. Nothing was built or run. The errors were corrected
+  in the brief and in seven other `-claude` files that shared them
+  (`leases-`, `leases-critique-`, `watchers-`, `storage-`,
+  `wal-replacement-`, `chubby-perspectives-`, `nuraft-rocksdb-rewrite-`);
+  each file dates its corrections. Those that change a conclusion:
+  - Lease failover (brief LS2; `leases-claude.md` §3.4, R1 and R2). etcd
+    #22714 (filed 2026-11-06, open; fix PR #22730 open) reports that when a
+    leader is partitioned as more than 16 leases expire on it, the
+    revocations queued behind its 16-slot limit are proposed after it steps
+    down, forwarded and applied. They delete leases that clients are
+    renewing on the new leader: 168–184 of 200 in the reporter's trials on
+    v3.7.2 and v3.6.15. The mechanism matches the code at `v3.7.3` (High);
+    the rates were not re-run here (Moderate). The earlier statement that
+    the new leader's lease extension covers a partitioned leader holds for
+    acknowledged renewals only.
+  - jetcd. Versions 0.5.8–0.8.4 retried writes on `UNAVAILABLE` (by code;
+    the files said "≤ 0.8.3"). jetcd ≤ 0.8.7 stops renewing a lease after a
+    clean keep-alive stream end (jetcd #1383, fixed in 0.8.8 by PR #1628;
+    new brief row LS11). The floor is therefore 0.8.5 for writes and 0.8.8
+    for applications that keep leases alive. The 0.8.8 diff was read for
+    this; the clone stays at `jetcd-0.8.7`.
+  - Locks. `ETCD_LOCK_REV` is the response-header revision at acquisition,
+    not the key's create revision. `Election.Campaign` lacks the post-wait
+    ownership check that #11456 added to `Mutex.Lock`.
+  - Governance (brief §5). The SIG etcd charter's scope is "Owns the etcd
+    project and how it is used by Kubernetes"; the brief had said the scope
+    is Kubernetes' usage. The headline now reads that upstream capacity is
+    limited and that its priorities follow Kubernetes in practice.
+  - Smaller ones: kubernetes#111116 was fixed in 2022 (a 30 s retry in the
+    watch cache); jetcd's CI runs against etcd v3.5.29 and v3.6.11 images,
+    not the launcher's v3.5.14 default; `storage-claude.md` §10 named a
+    metric that does not exist; the reply to a write follows apply, not a
+    backend commit; `tools/benchmark put --rate` caps the rate but stays
+    closed-loop.
+  New upstream items recorded: etcd #22714, PR #22730, and #22687 (a
+  second gRPC-proxy event-loss report, filed 2026-11-02).
+- 2026-11-10: Antigravity edited `leases-agy.md`, `watchers-agy.md` and
+  `etcd-issues-and-mitigations-agy.md` (file times 23:24–23:35): a citation
+  and accuracy pass across most sections. It gives full paths and
+  re-checked line ranges, adds or corrects PR numbers and commit hashes
+  (e.g. `jetcd-0.8.8` = `a2909b838`), adds Chubby paper line citations, and
+  recasts #20242 as suppression of on-demand progress requests on one
+  shared gRPC stream, not server-wide. Its `History:` lines do not record
+  the pass, and no other tool reviewed it. Its brief gives the jetcd
+  write-retry range as 0.6.0–0.8.3; Claude's check of the jetcd code gives
+  0.5.8–0.8.4.
+- 2026-11-11: `analysis/INDEX.md` updated for the eleven files above, at
+  the user's request: a paragraph on the two passes and notes on nine rows.
+  A denylist scan of the working tree (the publish script's `grep -i -F`,
+  paper excluded) found nothing.

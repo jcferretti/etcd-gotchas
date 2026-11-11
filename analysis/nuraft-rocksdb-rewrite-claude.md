@@ -394,7 +394,7 @@ ClickHouse Keeper added RocksDB-backed storage in 2024 (#56626, experimental). I
 ### 6.2 What only B buys, and how A gets most of it
 
 B's real advantages are wire changes old clients cannot express:
-- **Exactly-once semantics.** etcd has no request IDs, so a server cannot deduplicate a client's retries. Client session IDs with sequence numbers would fix that, the approach of the Raft dissertation §6.3 (*recalled*).
+- **Exactly-once semantics.** etcd's write requests carry no client-supplied request ID, and the server keeps no record of executed requests, so it cannot deduplicate a client's retries. Client session IDs with sequence numbers would fix that, the approach of the Raft dissertation §6.3 (*recalled*).
 - **Chubby-style coupling** of session KeepAlive with cache invalidation (`chubby-perspectives-claude.md`).
 - **A leaner framing.**
 
