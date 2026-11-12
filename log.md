@@ -396,3 +396,23 @@ recorded here (`AGENTS.md` §9, rule 1).
   the user's request: a paragraph on the two passes and notes on nine rows.
   A denylist scan of the working tree (the publish script's `grep -i -F`,
   paper excluded) found nothing.
+- 2026-11-11: jetcd write-retry range reconciled. At the user's request,
+  Claude Code sent Antigravity a summary of the discrepancy recorded in the
+  2026-11-10 entry above. Antigravity re-checked it in `~/github/jetcd` and
+  on Maven Central, agreed, and changed 0.6.0–0.8.3 to 0.5.8–0.8.4 in
+  `etcd-issues-and-mitigations-agy.md` (three places) and `leases-agy.md`
+  (§4.4). The evidence, checked by both tools:
+  - Lower bound: jetcd commit `70c463c`, "Retry on unavailable error"
+    (2021-07-08, "Fixes #947"), is first contained in tag `jetcd-0.5.8`.
+  - Upper bound: the fix `05f92e044` (PR #1445, 2025-02-15) is first
+    contained in `jetcd-0.8.5`. `jetcd-core` 0.8.4 was published on Maven
+    Central on 2024-11-14 and has no git tag of its own
+    (`jetcd-0.8.4-alpha` is the commit of `jetcd-0.8.3`).
+  - Jepsen's report states 0.6.0–0.8.2. The Codex brief gives that range
+    as the report's, with the fix in 0.8.5; that is accurate and was left
+    as it is.
+  Antigravity also updated the `History:` lines of its three files to
+  record its 2026-11-10 pass, so the note above that they do not record it
+  no longer holds. `analysis/INDEX.md` was updated to match (the paragraph
+  on the passes and the three `-agy` rows), at the user's request. Nothing
+  was built or run.

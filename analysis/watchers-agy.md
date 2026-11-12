@@ -1,6 +1,6 @@
 # Watchers: Raft Bypass, Leader Failover, API Promises, and Client/Server Failure States
 
-- **History:** revised 2026-11-01 for exposition clarity and cross-validated against `etcd v3.7.3` and `jetcd 0.8.7`; updated 2026-11-09 with findings from the Jepsen [`etcd 3.4.3`](https://jepsen.io/analyses/etcd-3.4.3) and [`jetcd 0.8.2`](https://jepsen.io/analyses/jetcd-0.8.2) analyses and associated upstream fixes through `etcd v3.7.3` and `jetcd-0.8.7` / `jetcd-0.8.8`
+- **History:** revised 2026-11-01 for exposition clarity and cross-validated against `etcd v3.7.3` and `jetcd 0.8.7`; updated 2026-11-09 with findings from the Jepsen [`etcd 3.4.3`](https://jepsen.io/analyses/etcd-3.4.3) and [`jetcd 0.8.2`](https://jepsen.io/analyses/jetcd-0.8.2) analyses and associated upstream fixes through `etcd v3.7.3` and `jetcd-0.8.7` / `jetcd-0.8.8`; accuracy-reviewed and revised 2026-11-10 (fixing verbatim code listings, citations, `#20242` per-stream scope, and `jepsen-etcd` `watch.clj` behavior)
 - **Versions analyzed:** etcd `v3.7.3` (`0a173d0410a9`, plus upstream `origin/release-3.7` = `8e2ce34ca` and `origin/main` = `6974f5223` checked for post-`v3.7.3` changes); jetcd `jetcd-0.8.7` (`23b61f1499a5`, plus upstream tag `jetcd-0.8.8` = `a2909b838` / `origin/main` checked for post-`0.8.7` diffs); raft `go.etcd.io/raft/v3` `v3.7.0`; selected Kubernetes `v1.37.2` storage/cacher files; selected upstream `main` commits cited explicitly where relevant
 - **Upstream references:**
   - **External analyses:**
